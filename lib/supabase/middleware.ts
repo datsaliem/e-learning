@@ -9,6 +9,15 @@ import { env } from "../env";
  * Server Component có thể đọc phải session đã hết hạn.
  */
 export async function updateSession(request: NextRequest) {
+  const hasSupabaseConfig =
+    !env.supabaseUrl.includes("your-project.supabase.co") &&
+    env.supabaseAnonKey !== "your-anon-key" &&
+    !env.supabaseAnonKey.startsWith("placeholder");
+
+  if (!hasSupabaseConfig) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(env.supabaseUrl, env.supabaseAnonKey, {
@@ -28,7 +37,12 @@ export async function updateSession(request: NextRequest) {
 
   // Không được bỏ dòng này: getUser() vừa xác thực JWT với Supabase Auth
   // server vừa kích hoạt việc refresh token khi cần.
-  await supabase.auth.getUser();
+  try {
+    await supabase.auth.getUser();
+  } catch {
+    // Không chặn toàn bộ website khi Supabase tạm thời không truy cập được.
+    return NextResponse.next({ request });
+  }
 
   return supabaseResponse;
 }
