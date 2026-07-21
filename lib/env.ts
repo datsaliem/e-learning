@@ -14,3 +14,8 @@ export const env = {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   ),
 };
+
+export const isSupabaseConfigured =
+  !env.supabaseUrl.includes("your-project.supabase.co") &&
+  env.supabaseAnonKey !== "your-anon-key" &&
+  !env.supabaseAnonKey.startsWith("placeholder");

@@ -1,7 +1,6 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { env } from "../env";
+import { env, isSupabaseConfigured } from "../env";
 
 /**
  * Refresh session (access token) trước khi request tới Server Component.
@@ -9,15 +8,11 @@ import { env } from "../env";
  * Server Component có thể đọc phải session đã hết hạn.
  */
 export async function updateSession(request: NextRequest) {
-  const hasSupabaseConfig =
-    !env.supabaseUrl.includes("your-project.supabase.co") &&
-    env.supabaseAnonKey !== "your-anon-key" &&
-    !env.supabaseAnonKey.startsWith("placeholder");
-
-  if (!hasSupabaseConfig) {
+  if (!isSupabaseConfigured) {
     return NextResponse.next({ request });
   }
 
+  const { createServerClient } = await import("@supabase/ssr");
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(env.supabaseUrl, env.supabaseAnonKey, {

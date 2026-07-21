@@ -2,8 +2,8 @@ import "server-only";
 
 import { redirect } from "next/navigation";
 
-import { createClient } from "@/lib/supabase/server";
 import type { UserRole } from "@/features/auth/types";
+import { isSupabaseConfigured } from "@/lib/env";
 
 export interface CurrentUser {
   id: string;
@@ -14,7 +14,12 @@ export interface CurrentUser {
 
 /** Trả về user đang đăng nhập kèm role, hoặc null nếu chưa đăng nhập. */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+
   try {
+    const { createClient } = await import("@/lib/supabase/server");
     const supabase = await createClient();
     const {
       data: { user },
