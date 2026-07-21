@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { env } from "@/lib/env";
+import { env } from "../env";
 
 /**
  * Refresh session (access token) trước khi request tới Server Component.
