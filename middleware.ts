@@ -7,7 +7,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  runtime: "nodejs",
   matcher: [
     /*
      * Áp dụng cho mọi route trừ static assets, ảnh và favicon — tránh
