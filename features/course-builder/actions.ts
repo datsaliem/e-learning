@@ -1,0 +1,249 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+
+import { createClient } from "@/lib/supabase/server";
+import { courseBuilderSchema, type CourseBuilderInput } from "@/features/course-builder/schemas";
+import type {
+  CourseMediaMutationInput,
+  CourseMutationResult,
+} from "@/features/course-builder/types";
+
+const SESSION_ERROR = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
+const PERMISSION_ERROR = "Bạn không có quyền chỉnh sửa khoá học này.";
+
+async function getInstructorContext() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return { ok: false, error: SESSION_ERROR } as const;
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (profile?.role !== "instructor") {
+    return {
+      ok: false,
+      error: "Chỉ tài khoản giảng viên mới có thể quản lý khoá học.",
+    } as const;
+  }
+
+  return { ok: true, supabase, user } as const;
+}
+
+function revalidateCourseBuilder(courseId: string) {
+  revalidatePath("/instructor/dashboard");
+  revalidatePath(`/instructor/courses/${courseId}/edit`);
+}
+
+export async function saveCourseDraft(
+  courseId: string | null,
+  input: CourseBuilderInput,
+): Promise<CourseMutationResult> {
+  const parsed = courseBuilderSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: "Dữ liệu khoá học chưa hợp lệ. Vui lòng kiểm tra lại các trường." };
+  }
+
+  const context = await getInstructorContext();
+  if (!context.ok) {
+    return { error: context.error };
+  }
+
+  const { supabase, user } = context;
+  const courseValues = {
+    title: parsed.data.title.trim(),
+    slug: parsed.data.slug.trim(),
+    short_description: parsed.data.shortDescription.trim(),
+    description: parsed.data.fullDescription.trim(),
+    category: parsed.data.category,
+    level: parsed.data.level,
+    language: parsed.data.language.trim(),
+    price: parsed.data.price,
+    sale_price: parsed.data.salePrice ?? null,
+    status: "draft" as const,
+    submitted_at: null,
+  };
+
+  if (!courseId) {
+    const { data, error } = await supabase
+      .from("courses")
+      .insert({ ...courseValues, instructor_id: user.id })
+      .select("id")
+      .single();
+
+    if (error || !data) {
+      return {
+        error:
+          error?.code === "23505"
+            ? "Slug này đã được sử dụng. Vui lòng chọn slug khác."
+            : "Không thể tạo bản nháp khoá học. Vui lòng thử lại.",
+      };
+    }
+
+    revalidateCourseBuilder(data.id);
+    return { data: { courseId: data.id, status: "draft" } };
+  }
+
+  const { data, error } = await supabase
+    .from("courses")
+    .update(courseValues)
+    .eq("id", courseId)
+    .eq("instructor_id", user.id)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    return {
+      error:
+        error.code === "23505"
+          ? "Slug này đã được sử dụng. Vui lòng chọn slug khác."
+          : "Không thể lưu bản nháp khoá học. Vui lòng thử lại.",
+    };
+  }
+
+  if (!data) {
+    return { error: PERMISSION_ERROR };
+  }
+
+  revalidateCourseBuilder(courseId);
+  return { data: { courseId, status: "draft" } };
+}
+
+function isOwnedCourseMediaUrl(url: string, courseId: string): boolean {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) return false;
+
+  try {
+    const candidate = new URL(url);
+    const projectUrl = new URL(supabaseUrl);
+    const expectedPath = `/storage/v1/object/public/course-media/${courseId}/`;
+
+    return candidate.origin === projectUrl.origin && candidate.pathname.startsWith(expectedPath);
+  } catch {
+    return false;
+  }
+}
+
+export async function updateCourseMedia(
+  courseId: string,
+  input: CourseMediaMutationInput,
+): Promise<CourseMutationResult> {
+  const context = await getInstructorContext();
+  if (!context.ok) {
+    return { error: context.error };
+  }
+
+  const mediaValues: { thumbnail_url?: string; trailer_url?: string } = {};
+
+  if (input.thumbnailUrl) {
+    if (!isOwnedCourseMediaUrl(input.thumbnailUrl, courseId)) {
+      return { error: "URL thumbnail không hợp lệ." };
+    }
+    mediaValues.thumbnail_url = input.thumbnailUrl;
+  }
+
+  if (input.trailerUrl) {
+    if (!isOwnedCourseMediaUrl(input.trailerUrl, courseId)) {
+      return { error: "URL trailer không hợp lệ." };
+    }
+    mediaValues.trailer_url = input.trailerUrl;
+  }
+
+  if (Object.keys(mediaValues).length === 0) {
+    return { data: { courseId, status: "draft" } };
+  }
+
+  const { supabase, user } = context;
+  const { data, error } = await supabase
+    .from("courses")
+    .update(mediaValues)
+    .eq("id", courseId)
+    .eq("instructor_id", user.id)
+    .select("id, status")
+    .maybeSingle();
+
+  if (error) {
+    return { error: "Media đã được tải lên nhưng chưa thể liên kết với khoá học." };
+  }
+
+  if (!data) {
+    return { error: PERMISSION_ERROR };
+  }
+
+  revalidateCourseBuilder(courseId);
+  return { data: { courseId, status: data.status } };
+}
+
+export async function submitCourseForReview(courseId: string): Promise<CourseMutationResult> {
+  const context = await getInstructorContext();
+  if (!context.ok) {
+    return { error: context.error };
+  }
+
+  const { supabase, user } = context;
+  const { data: course, error: courseError } = await supabase
+    .from("courses")
+    .select(
+      "id, title, slug, short_description, description, category, level, language, thumbnail_url, trailer_url, price, sale_price",
+    )
+    .eq("id", courseId)
+    .eq("instructor_id", user.id)
+    .maybeSingle();
+
+  if (courseError) {
+    return { error: "Không thể kiểm tra khoá học trước khi gửi duyệt." };
+  }
+
+  if (!course) {
+    return { error: PERMISSION_ERROR };
+  }
+
+  const parsed = courseBuilderSchema.safeParse({
+    title: course.title ?? "",
+    slug: course.slug ?? "",
+    shortDescription: course.short_description ?? "",
+    fullDescription: course.description ?? "",
+    category: course.category ?? "",
+    level: course.level ?? "",
+    language: course.language ?? "",
+    thumbnailUrl: course.thumbnail_url ?? "",
+    trailerUrl: course.trailer_url ?? "",
+    price: Number(course.price ?? 0),
+    salePrice: course.sale_price === null ? undefined : Number(course.sale_price),
+  });
+
+  if (!parsed.success) {
+    return { error: "Khoá học chưa đủ thông tin hợp lệ để gửi duyệt." };
+  }
+
+  if (!course.thumbnail_url) {
+    return { error: "Vui lòng tải thumbnail trước khi gửi duyệt." };
+  }
+
+  const { data, error } = await supabase
+    .from("courses")
+    .update({ status: "pending_review", submitted_at: new Date().toISOString() })
+    .eq("id", courseId)
+    .eq("instructor_id", user.id)
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    return { error: "Không thể gửi khoá học để duyệt. Vui lòng thử lại." };
+  }
+
+  if (!data) {
+    return { error: PERMISSION_ERROR };
+  }
+
+  revalidateCourseBuilder(courseId);
+  return { data: { courseId, status: "pending_review" } };
+}
