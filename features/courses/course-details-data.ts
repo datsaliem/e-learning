@@ -35,7 +35,11 @@ export const COURSE_DETAILS: Record<
             durationMinutes: 10,
             isPreview: true,
             resources: [
-              { id: "c1-s1-l1-r1", name: "Slide bài giảng - Giới thiệu Next.js", fileLabel: "PDF · 1.8 MB" },
+              {
+                id: "c1-s1-l1-r1",
+                name: "Slide bài giảng - Giới thiệu Next.js",
+                fileLabel: "PDF · 1.8 MB",
+              },
             ],
           },
           {
