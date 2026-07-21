@@ -8,36 +8,40 @@ import { env, isSupabaseConfigured } from "../env";
  * Server Component có thể đọc phải session đã hết hạn.
  */
 export async function updateSession(request: NextRequest) {
-  if (!isSupabaseConfigured) {
+  const hasSupabaseAuthCookie = request.cookies
+    .getAll()
+    .some(({ name }) => name.startsWith("sb-") && name.includes("auth-token"));
+
+  if (!isSupabaseConfigured || !hasSupabaseAuthCookie) {
     return NextResponse.next({ request });
   }
 
-  const { createServerClient } = await import("@supabase/ssr");
-  let supabaseResponse = NextResponse.next({ request });
-
-  const supabase = createServerClient(env.supabaseUrl, env.supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
-        supabaseResponse = NextResponse.next({ request });
-        cookiesToSet.forEach(({ name, value, options }) =>
-          supabaseResponse.cookies.set(name, value, options),
-        );
-      },
-    },
-  });
-
-  // Không được bỏ dòng này: getUser() vừa xác thực JWT với Supabase Auth
-  // server vừa kích hoạt việc refresh token khi cần.
   try {
+    const { createServerClient } = await import("@supabase/ssr");
+    let supabaseResponse = NextResponse.next({ request });
+
+    const supabase = createServerClient(env.supabaseUrl, env.supabaseAnonKey, {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          supabaseResponse = NextResponse.next({ request });
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options),
+          );
+        },
+      },
+    });
+
+    // Không được bỏ dòng này: getUser() vừa xác thực JWT với Supabase Auth
+    // server vừa kích hoạt việc refresh token khi cần.
     await supabase.auth.getUser();
+    return supabaseResponse;
   } catch {
-    // Không chặn toàn bộ website khi Supabase tạm thời không truy cập được.
+    // Auth refresh không được phép làm hỏng toàn bộ website nếu runtime hoặc
+    // Supabase tạm thời không khả dụng.
     return NextResponse.next({ request });
   }
-
-  return supabaseResponse;
 }
