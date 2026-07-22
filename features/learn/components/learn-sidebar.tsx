@@ -1,5 +1,12 @@
 import Link from "next/link";
-import { CheckCircle2Icon, CircleIcon, FileTextIcon, PlayCircleIcon } from "lucide-react";
+import {
+  CheckCircle2Icon,
+  CircleIcon,
+  ExternalLinkIcon,
+  FileArchiveIcon,
+  FileTextIcon,
+  PlayCircleIcon,
+} from "lucide-react";
 
 import {
   Accordion,
@@ -15,6 +22,13 @@ function formatDuration(seconds: number): string {
   const minutes = Math.max(1, Math.ceil(seconds / 60));
   return `${minutes} phút`;
 }
+
+const LESSON_TYPE_LABEL = {
+  video: "Video",
+  text: "Bài đọc",
+  pdf: "PDF",
+  external_link: "Liên kết",
+} as const;
 
 export function LearnSidebar({
   courseTitle,
@@ -98,8 +112,18 @@ export function LearnSidebar({
                             className="text-primary mt-0.5 size-4 shrink-0"
                             aria-hidden="true"
                           />
-                        ) : lesson.type === "article" ? (
+                        ) : lesson.type === "text" ? (
                           <FileTextIcon
+                            className="text-muted-foreground/60 mt-0.5 size-4 shrink-0"
+                            aria-hidden="true"
+                          />
+                        ) : lesson.type === "pdf" ? (
+                          <FileArchiveIcon
+                            className="text-muted-foreground/60 mt-0.5 size-4 shrink-0"
+                            aria-hidden="true"
+                          />
+                        ) : lesson.type === "external_link" ? (
+                          <ExternalLinkIcon
                             className="text-muted-foreground/60 mt-0.5 size-4 shrink-0"
                             aria-hidden="true"
                           />
@@ -112,7 +136,7 @@ export function LearnSidebar({
                         <span className="min-w-0 flex-1">
                           <span className="line-clamp-2">{lesson.title}</span>
                           <span className="mt-0.5 block text-xs font-normal opacity-75">
-                            {lesson.type === "video" ? "Video" : "Bài đọc"} ·{" "}
+                            {LESSON_TYPE_LABEL[lesson.type]} ·{" "}
                             {formatDuration(lesson.durationSeconds)}
                           </span>
                         </span>

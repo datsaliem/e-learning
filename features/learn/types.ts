@@ -1,4 +1,4 @@
-export type LessonContentType = "video" | "article";
+export type LessonContentType = "video" | "text" | "pdf" | "external_link";
 
 export interface LessonProgressEntry {
   lessonId: string;
@@ -19,6 +19,8 @@ export interface LearningLesson {
   type: LessonContentType;
   content: string | null;
   videoUrl: string | null;
+  documentUrl: string | null;
+  externalUrl: string | null;
   durationSeconds: number;
   resources: LearningResource[];
 }
