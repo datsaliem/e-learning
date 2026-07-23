@@ -1,14 +1,17 @@
 import type { Metadata } from "next";
 
-import { DashboardShell } from "@/features/auth/components/dashboard-shell";
-import { requireRole } from "@/features/auth/queries";
+import { AdminDashboard } from "@/features/admin-dashboard/components/admin-dashboard";
+import { getAdminDashboard } from "@/features/admin-dashboard/queries";
 
 export const metadata: Metadata = {
   title: "Bảng điều khiển quản trị",
+  description: "Tổng quan người dùng, khóa học, đơn hàng và tăng trưởng toàn hệ thống.",
 };
 
-export default async function AdminDashboardPage() {
-  const user = await requireRole("admin");
+export const dynamic = "force-dynamic";
 
-  return <DashboardShell user={user} heading="Bảng điều khiển quản trị" />;
+export default async function AdminDashboardPage() {
+  const dashboard = await getAdminDashboard();
+
+  return <AdminDashboard data={dashboard} />;
 }

@@ -8,6 +8,7 @@ import type {
   CourseMediaMutationInput,
   CourseMutationResult,
 } from "@/features/course-builder/types";
+import { isEditableCourseStatus, type CourseWorkflowStatus } from "@/types/course";
 
 const SESSION_ERROR = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
 const PERMISSION_ERROR = "Bạn không có quyền chỉnh sửa khoá học này.";
@@ -68,14 +69,17 @@ export async function saveCourseDraft(
     language: parsed.data.language.trim(),
     price: parsed.data.price,
     sale_price: parsed.data.salePrice ?? null,
-    status: "draft" as const,
-    submitted_at: null,
   };
 
   if (!courseId) {
     const { data, error } = await supabase
       .from("courses")
-      .insert({ ...courseValues, instructor_id: user.id })
+      .insert({
+        ...courseValues,
+        instructor_id: user.id,
+        status: "draft",
+        submitted_at: null,
+      })
       .select("id")
       .single();
 
@@ -90,6 +94,24 @@ export async function saveCourseDraft(
 
     revalidateCourseBuilder(data.id);
     return { data: { courseId: data.id, status: "draft" } };
+  }
+
+  const { data: currentCourse } = await supabase
+    .from("courses")
+    .select("id, status")
+    .eq("id", courseId)
+    .eq("instructor_id", user.id)
+    .maybeSingle();
+
+  if (!currentCourse) {
+    return { error: PERMISSION_ERROR };
+  }
+
+  const currentStatus = currentCourse.status as CourseWorkflowStatus;
+  if (!isEditableCourseStatus(currentStatus)) {
+    return {
+      error: "Khóa học đang được kiểm duyệt hoặc đã xuất bản nên hiện chỉ có thể xem.",
+    };
   }
 
   const { data, error } = await supabase
@@ -114,7 +136,7 @@ export async function saveCourseDraft(
   }
 
   revalidateCourseBuilder(courseId);
-  return { data: { courseId, status: "draft" } };
+  return { data: { courseId, status: currentStatus } };
 }
 
 function isOwnedCourseMediaUrl(url: string, courseId: string): boolean {
@@ -158,7 +180,16 @@ export async function updateCourseMedia(
   }
 
   if (Object.keys(mediaValues).length === 0) {
-    return { data: { courseId, status: "draft" } };
+    const { data } = await context.supabase
+      .from("courses")
+      .select("status")
+      .eq("id", courseId)
+      .eq("instructor_id", context.user.id)
+      .maybeSingle();
+
+    return data
+      ? { data: { courseId, status: data.status as CourseWorkflowStatus } }
+      : { error: PERMISSION_ERROR };
   }
 
   const { supabase, user } = context;
@@ -192,7 +223,7 @@ export async function submitCourseForReview(courseId: string): Promise<CourseMut
   const { data: course, error: courseError } = await supabase
     .from("courses")
     .select(
-      "id, title, slug, short_description, description, category, level, language, thumbnail_url, trailer_url, price, sale_price",
+      "id, title, slug, short_description, description, category, level, language, thumbnail_url, trailer_url, price, sale_price, status",
     )
     .eq("id", courseId)
     .eq("instructor_id", user.id)
@@ -204,6 +235,10 @@ export async function submitCourseForReview(courseId: string): Promise<CourseMut
 
   if (!course) {
     return { error: PERMISSION_ERROR };
+  }
+
+  if (!isEditableCourseStatus(course.status as CourseWorkflowStatus)) {
+    return { error: "Khóa học không thể gửi duyệt ở trạng thái hiện tại." };
   }
 
   const parsed = courseBuilderSchema.safeParse({
@@ -230,9 +265,10 @@ export async function submitCourseForReview(courseId: string): Promise<CourseMut
 
   const { data, error } = await supabase
     .from("courses")
-    .update({ status: "pending_review", submitted_at: new Date().toISOString() })
+    .update({ status: "pending_review" })
     .eq("id", courseId)
     .eq("instructor_id", user.id)
+    .in("status", ["draft", "changes_requested", "rejected"])
     .select("id")
     .maybeSingle();
 

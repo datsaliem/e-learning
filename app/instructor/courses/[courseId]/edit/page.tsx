@@ -6,6 +6,7 @@ import { CourseBuilderForm } from "@/features/course-builder/components/course-b
 import { getOwnedCourseDraft } from "@/features/course-builder/queries";
 import { CurriculumBuilder } from "@/features/curriculum/components/curriculum-builder";
 import { getOwnedCourseCurriculum } from "@/features/curriculum/queries";
+import { isEditableCourseStatus } from "@/types/course";
 
 interface EditCoursePageProps {
   params: Promise<{ courseId: string }>;
@@ -29,7 +30,11 @@ export default async function EditCoursePage({ params }: EditCoursePageProps) {
   return (
     <>
       <CourseBuilderForm instructorName={user.fullName ?? user.email} initialCourse={course} />
-      <CurriculumBuilder courseId={courseId} initialSections={curriculum} />
+      <CurriculumBuilder
+        courseId={courseId}
+        initialSections={curriculum}
+        readOnly={!isEditableCourseStatus(course.status)}
+      />
     </>
   );
 }

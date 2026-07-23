@@ -12,6 +12,7 @@ import { formatCurrencyVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { safeAction } from "@/lib/safe-action";
 import { enrollInCourse } from "@/features/enrollments/actions";
+import { AddToCartButton } from "@/features/cart/components/add-to-cart-button";
 import { CATEGORY_GRADIENT, LEVEL_LABEL } from "@/features/courses/constants";
 import type { CourseDetail } from "@/features/courses/types";
 
@@ -75,10 +76,12 @@ export function CourseEnrollCard({
           <Button size="lg" nativeButton={false} render={<Link href="/dashboard" />}>
             Tiếp tục học
           </Button>
+        ) : course.price > 0 ? (
+          <AddToCartButton course={course} />
         ) : isAuthenticated ? (
           <Button size="lg" disabled={isPending} onClick={handleEnroll}>
             {isPending && <Loader2Icon className="animate-spin" />}
-            {course.price === 0 ? "Ghi danh miễn phí" : "Mua khoá học"}
+            Ghi danh miễn phí
           </Button>
         ) : (
           <Button size="lg" nativeButton={false} render={<Link href="/login" />}>

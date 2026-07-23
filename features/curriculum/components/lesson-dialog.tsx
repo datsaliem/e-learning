@@ -5,14 +5,18 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import {
+  CircleAlertIcon,
+  CircleCheckIcon,
   FileArchiveIcon,
   FileTextIcon,
+  ImageIcon,
   LinkIcon,
   Loader2Icon,
   PaperclipIcon,
   Trash2Icon,
   UploadCloudIcon,
   VideoIcon,
+  XIcon,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -34,6 +38,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -43,20 +48,28 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { safeAction } from "@/lib/safe-action";
-import {
-  addLessonResources,
-  deleteLessonResource,
-  saveLesson,
-  updateLessonContent,
-} from "@/features/curriculum/actions";
+import { saveLesson, updateLessonContent } from "@/features/curriculum/actions";
 import { lessonFormSchema, type LessonFormInput } from "@/features/curriculum/schemas";
 import {
-  removeUploadedContent,
-  uploadLessonContent,
-  uploadLessonResources,
-  validateLessonContentFile,
-  validateResourceFile,
-} from "@/features/curriculum/storage";
+  cancelLessonContentUpload,
+  cancelLessonResourceUpload,
+  completeLessonResourceUpload,
+  deleteLessonResourceFile,
+  prepareLessonContentUpload,
+  prepareLessonResourceUpload,
+} from "@/features/lesson-resources/actions";
+import {
+  formatFileSize,
+  LESSON_RESOURCE_ACCEPT,
+  MAX_LESSON_RESOURCES,
+  validateLessonContentMetadata,
+  validateLessonResourceMetadata,
+} from "@/features/lesson-resources/config";
+import {
+  createResumableUploadTask,
+  UploadCancelledError,
+  type ResumableUploadTask,
+} from "@/features/lesson-resources/resumable-upload";
 import type {
   CurriculumLesson,
   CurriculumLessonType,
@@ -86,10 +99,29 @@ function fileNameFromPath(path: string | null | undefined): string | null {
   return path.split("/").at(-1) ?? path;
 }
 
-function formatFileSize(bytes: number | null): string {
-  if (bytes === null) return "";
-  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+type PendingUploadStatus = "queued" | "uploading" | "error" | "cancelled";
+
+interface PendingResourceUpload {
+  id: string;
+  file: File;
+  progress: number;
+  status: PendingUploadStatus;
+  error?: string;
+}
+
+interface ActiveUpload {
+  id: string;
+  task: ResumableUploadTask;
+}
+
+function fileMetadata(file: File) {
+  return { name: file.name, mimeType: file.type, fileSizeBytes: file.size };
+}
+
+function resourceIcon(mimeType: string | null) {
+  if (mimeType?.startsWith("video/")) return VideoIcon;
+  if (mimeType?.startsWith("image/")) return ImageIcon;
+  return FileTextIcon;
 }
 
 interface LessonDialogProps {
@@ -114,13 +146,19 @@ export function LessonDialog({
   onResourceDeleted,
 }: LessonDialogProps) {
   const [isSaving, setIsSaving] = React.useState(false);
+  const [isCancelling, setIsCancelling] = React.useState(false);
   const [progressLabel, setProgressLabel] = React.useState<string | null>(null);
+  const [contentUploadProgress, setContentUploadProgress] = React.useState<number | null>(null);
   const [contentFile, setContentFile] = React.useState<File | null>(null);
-  const [resourceFiles, setResourceFiles] = React.useState<File[]>([]);
+  const [pendingResourceUploads, setPendingResourceUploads] = React.useState<
+    PendingResourceUpload[]
+  >([]);
   const [resources, setResources] = React.useState<CurriculumResource[]>(lesson?.resources ?? []);
   const [workingLesson, setWorkingLesson] = React.useState<CurriculumLesson | null>(lesson);
   const [deletingResourceId, setDeletingResourceId] = React.useState<string | null>(null);
   const [fileInputKey, setFileInputKey] = React.useState(0);
+  const [activeUploadId, setActiveUploadId] = React.useState<string | null>(null);
+  const activeUploadRef = React.useRef<ActiveUpload | null>(null);
 
   const form = useForm<LessonFormInput>({
     resolver: zodResolver(lessonFormSchema),
@@ -149,7 +187,10 @@ export function LessonDialog({
     setWorkingLesson(lesson);
     setResources(lesson?.resources ?? []);
     setContentFile(null);
-    setResourceFiles([]);
+    setContentUploadProgress(null);
+    setPendingResourceUploads([]);
+    setActiveUploadId(null);
+    activeUploadRef.current = null;
     setFileInputKey((current) => current + 1);
   }, [form, initialSectionId, lesson, open]);
 
@@ -162,7 +203,8 @@ export function LessonDialog({
       setContentFile(null);
       return;
     }
-    const error = validateLessonContentFile(file, lessonType);
+    if (lessonType !== "video" && lessonType !== "pdf") return;
+    const error = validateLessonContentMetadata(fileMetadata(file), lessonType);
     if (error) {
       toast.error(error);
       setFileInputKey((current) => current + 1);
@@ -172,18 +214,67 @@ export function LessonDialog({
   }
 
   function chooseResourceFiles(files: File[]) {
-    if (files.length + resources.length > 10) {
-      toast.error("Mỗi bài học có tối đa 10 tài liệu đính kèm.");
+    const availableSlots = MAX_LESSON_RESOURCES - resources.length - pendingResourceUploads.length;
+    if (files.length > availableSlots) {
+      toast.error(`Mỗi bài học có tối đa ${MAX_LESSON_RESOURCES} tài liệu đính kèm.`);
       return;
     }
+
     for (const file of files) {
-      const error = validateResourceFile(file);
+      const error = validateLessonResourceMetadata(fileMetadata(file));
       if (error) {
         toast.error(`${file.name}: ${error}`);
         return;
       }
     }
-    setResourceFiles(files);
+
+    const existingKeys = new Set(
+      pendingResourceUploads.map(
+        ({ file }) => `${file.name}:${file.size}:${file.lastModified}:${file.type}`,
+      ),
+    );
+    const uniqueFiles = files.filter((file) => {
+      const key = `${file.name}:${file.size}:${file.lastModified}:${file.type}`;
+      if (existingKeys.has(key)) return false;
+      existingKeys.add(key);
+      return true;
+    });
+
+    setPendingResourceUploads((current) => [
+      ...current,
+      ...uniqueFiles.map((file) => ({
+        id: crypto.randomUUID(),
+        file,
+        progress: 0,
+        status: "queued" as const,
+      })),
+    ]);
+  }
+
+  function updatePendingUpload(id: string, patch: Partial<PendingResourceUpload>) {
+    setPendingResourceUploads((current) =>
+      current.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+    );
+  }
+
+  async function cancelActiveUpload() {
+    const activeUpload = activeUploadRef.current;
+    if (!activeUpload) return;
+    setIsCancelling(true);
+    updatePendingUpload(activeUpload.id, { status: "cancelled", error: "Đang huỷ..." });
+    try {
+      await activeUpload.task.cancel();
+    } finally {
+      setIsCancelling(false);
+    }
+  }
+
+  function removePendingUpload(id: string) {
+    if (activeUploadId === id) {
+      void cancelActiveUpload();
+      return;
+    }
+    setPendingResourceUploads((current) => current.filter((item) => item.id !== id));
   }
 
   async function removeResource(resource: CurriculumResource) {
@@ -193,7 +284,7 @@ export function LessonDialog({
 
     setDeletingResourceId(resource.id);
     const result = await safeAction(() =>
-      deleteLessonResource(courseId, activeLessonId, resource.id),
+      deleteLessonResourceFile(courseId, activeLessonId, resource.id),
     );
     setDeletingResourceId(null);
 
@@ -221,8 +312,9 @@ export function LessonDialog({
 
     setIsSaving(true);
     setProgressLabel("Đang lưu thông tin bài học...");
-    let uploadedContentPath: string | null = null;
-    let uploadedResources: { storagePath: string }[] = [];
+    let savedLessonId: string | null = workingLesson?.id ?? lesson?.id ?? null;
+    let pendingContentPath: string | null = null;
+    let pendingResourceReservation: { resourceId: string; localId: string } | null = null;
 
     try {
       const activeLessonId = workingLesson?.id ?? lesson?.id ?? null;
@@ -233,43 +325,126 @@ export function LessonDialog({
         ...saveResult.data,
         resources,
       };
+      savedLessonId = nextLesson.id;
       setWorkingLesson(nextLesson);
+      onSaved(nextLesson);
 
       const uploadedLessonType = values.lessonType;
       if (contentFile && (uploadedLessonType === "video" || uploadedLessonType === "pdf")) {
         setProgressLabel(
           uploadedLessonType === "video" ? "Đang tải video lên..." : "Đang tải PDF lên...",
         );
-        uploadedContentPath = await uploadLessonContent(courseId, nextLesson.id, contentFile);
+        setContentUploadProgress(0);
+
+        const preparation = await safeAction(() =>
+          prepareLessonContentUpload(
+            courseId,
+            nextLesson.id,
+            uploadedLessonType,
+            fileMetadata(contentFile),
+          ),
+        );
+        if ("error" in preparation) throw new Error(preparation.error);
+
+        pendingContentPath = preparation.data.storagePath;
+        const task = createResumableUploadTask({
+          file: contentFile,
+          storagePath: preparation.data.storagePath,
+          uploadEndpoint: preparation.data.uploadEndpoint,
+          uploadToken: preparation.data.uploadToken,
+          onProgress: setContentUploadProgress,
+        });
+        activeUploadRef.current = { id: "lesson-content", task };
+        setActiveUploadId("lesson-content");
+
+        try {
+          await task.promise;
+        } catch (error) {
+          if (error instanceof UploadCancelledError) throw error;
+          throw new Error("Không thể tải file nội dung. Vui lòng kiểm tra mạng và thử lại.");
+        } finally {
+          activeUploadRef.current = null;
+          setActiveUploadId(null);
+        }
+
         const contentResult = await safeAction(() =>
           updateLessonContent(courseId, nextLesson.id, {
             lessonType: uploadedLessonType,
-            storagePath: uploadedContentPath!,
+            storagePath: preparation.data.storagePath,
           }),
         );
         if ("error" in contentResult) throw new Error(contentResult.error);
 
         nextLesson = {
           ...nextLesson,
-          videoPath: uploadedLessonType === "video" ? uploadedContentPath : null,
-          contentPath: uploadedLessonType === "pdf" ? uploadedContentPath : null,
+          videoPath: uploadedLessonType === "video" ? preparation.data.storagePath : null,
+          contentPath: uploadedLessonType === "pdf" ? preparation.data.storagePath : null,
         };
-        uploadedContentPath = null;
+        pendingContentPath = null;
+        setContentFile(null);
+        setContentUploadProgress(null);
+        setWorkingLesson(nextLesson);
+        onSaved(nextLesson);
       }
 
-      if (resourceFiles.length > 0) {
-        setProgressLabel("Đang tải tài liệu đính kèm...");
-        const uploads = await uploadLessonResources(courseId, nextLesson.id, resourceFiles);
-        uploadedResources = uploads;
-        const resourceResult = await safeAction(() =>
-          addLessonResources(courseId, nextLesson.id, uploads),
+      for (const pendingUpload of pendingResourceUploads) {
+        const { id: localId, file } = pendingUpload;
+        setProgressLabel(`Đang tải ${file.name}...`);
+        updatePendingUpload(localId, { status: "uploading", progress: 0, error: undefined });
+
+        const preparation = await safeAction(() =>
+          prepareLessonResourceUpload(courseId, nextLesson.id, fileMetadata(file)),
         );
-        if ("error" in resourceResult) throw new Error(resourceResult.error);
-        uploadedResources = [];
+        if ("error" in preparation) {
+          updatePendingUpload(localId, { status: "error", error: preparation.error });
+          throw new Error(preparation.error);
+        }
+
+        pendingResourceReservation = {
+          resourceId: preparation.data.resourceId,
+          localId,
+        };
+        const task = createResumableUploadTask({
+          file,
+          storagePath: preparation.data.storagePath,
+          uploadEndpoint: preparation.data.uploadEndpoint,
+          uploadToken: preparation.data.uploadToken,
+          onProgress: (progress) => updatePendingUpload(localId, { progress }),
+        });
+        activeUploadRef.current = { id: localId, task };
+        setActiveUploadId(localId);
+
+        try {
+          await task.promise;
+        } catch (error) {
+          if (error instanceof UploadCancelledError) throw error;
+          updatePendingUpload(localId, {
+            status: "error",
+            error: "Kết nối bị gián đoạn. Có thể thử tải lại.",
+          });
+          throw new Error(`Không thể tải ${file.name}. Vui lòng thử lại.`);
+        } finally {
+          activeUploadRef.current = null;
+          setActiveUploadId(null);
+        }
+
+        const completion = await safeAction(() =>
+          completeLessonResourceUpload(courseId, nextLesson.id, preparation.data.resourceId),
+        );
+        if ("error" in completion) {
+          updatePendingUpload(localId, { status: "error", error: completion.error });
+          throw new Error(completion.error);
+        }
+
+        pendingResourceReservation = null;
         nextLesson = {
           ...nextLesson,
-          resources: [...resources, ...resourceResult.data],
+          resources: [...nextLesson.resources, completion.data],
         };
+        setResources(nextLesson.resources);
+        setWorkingLesson(nextLesson);
+        setPendingResourceUploads((current) => current.filter((item) => item.id !== localId));
+        onSaved(nextLesson);
       }
 
       setWorkingLesson(nextLesson);
@@ -277,14 +452,34 @@ export function LessonDialog({
       toast.success(lesson ? "Đã cập nhật bài học." : "Đã tạo bài học.");
       onOpenChange(false);
     } catch (error) {
-      const paths = [
-        uploadedContentPath,
-        ...uploadedResources.map((resource) => resource.storagePath),
-      ].filter((path): path is string => Boolean(path));
-      await removeUploadedContent(paths);
-      toast.error(error instanceof Error ? error.message : "Không thể lưu bài học.");
+      if (pendingContentPath && savedLessonId) {
+        await safeAction(() =>
+          cancelLessonContentUpload(courseId, savedLessonId!, pendingContentPath!),
+        );
+      }
+      if (pendingResourceReservation && savedLessonId) {
+        await safeAction(() =>
+          cancelLessonResourceUpload(
+            courseId,
+            savedLessonId!,
+            pendingResourceReservation!.resourceId,
+          ),
+        );
+        updatePendingUpload(pendingResourceReservation.localId, {
+          status: error instanceof UploadCancelledError ? "cancelled" : "error",
+          progress: 0,
+          ...(error instanceof UploadCancelledError ? { error: "Đã huỷ tải lên." } : {}),
+        });
+      }
+
+      if (error instanceof UploadCancelledError) toast.info(error.message);
+      else toast.error(error instanceof Error ? error.message : "Không thể lưu bài học.");
     } finally {
+      activeUploadRef.current = null;
+      setActiveUploadId(null);
       setIsSaving(false);
+      setIsCancelling(false);
+      setContentUploadProgress(null);
       setProgressLabel(null);
     }
   }
@@ -452,38 +647,69 @@ export function LessonDialog({
                 <label htmlFor="lesson-content-file" className="text-sm font-medium">
                   {lessonType === "video" ? "File video" : "File PDF"}
                 </label>
-                <label
-                  htmlFor="lesson-content-file"
-                  className="border-border hover:bg-muted focus-within:ring-ring flex cursor-pointer items-center gap-3 rounded-xl border border-dashed px-4 py-4 transition-colors focus-within:ring-3"
-                >
-                  <span className="bg-primary/10 text-primary flex size-10 items-center justify-center rounded-lg">
-                    <UploadCloudIcon aria-hidden="true" />
-                  </span>
-                  <span className="min-w-0 text-sm">
-                    <span className="block truncate font-medium">
-                      {contentFile?.name ??
-                        fileNameFromPath(existingContentPath) ??
-                        "Chọn file để tải lên"}
+                <div className="border-border flex items-center gap-2 rounded-xl border border-dashed px-4 py-4">
+                  <label
+                    htmlFor="lesson-content-file"
+                    className="focus-within:ring-ring flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg focus-within:ring-3"
+                  >
+                    <span className="bg-primary/10 text-primary flex size-10 shrink-0 items-center justify-center rounded-lg">
+                      <UploadCloudIcon aria-hidden="true" />
                     </span>
-                    <span className="text-muted-foreground block text-xs">
-                      {lessonType === "video"
-                        ? "MP4, WEBM, MOV · tối đa 500MB"
-                        : "PDF · tối đa 50MB"}
+                    <span className="min-w-0 text-sm">
+                      <span className="block truncate font-medium">
+                        {contentFile?.name ??
+                          fileNameFromPath(existingContentPath) ??
+                          "Chọn file để tải lên"}
+                      </span>
+                      <span className="text-muted-foreground block text-xs">
+                        {lessonType === "video"
+                          ? "MP4, WEBM, MOV · tối đa 50MB"
+                          : "PDF · tối đa 50MB"}
+                      </span>
                     </span>
-                  </span>
-                  <input
-                    key={fileInputKey}
-                    id="lesson-content-file"
-                    type="file"
-                    accept={
-                      lessonType === "video"
-                        ? "video/mp4,video/webm,video/quicktime"
-                        : "application/pdf"
-                    }
-                    className="sr-only"
-                    onChange={(event) => chooseContentFile(event.currentTarget.files?.[0])}
-                  />
-                </label>
+                    <input
+                      key={fileInputKey}
+                      id="lesson-content-file"
+                      type="file"
+                      disabled={isSaving}
+                      accept={
+                        lessonType === "video"
+                          ? "video/mp4,video/webm,video/quicktime"
+                          : "application/pdf"
+                      }
+                      className="sr-only"
+                      onChange={(event) => chooseContentFile(event.currentTarget.files?.[0])}
+                    />
+                  </label>
+                  {contentFile && !isSaving ? (
+                    <Button
+                      type="button"
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={`Bỏ chọn ${contentFile.name}`}
+                      onClick={() => {
+                        setContentFile(null);
+                        setFileInputKey((current) => current + 1);
+                      }}
+                    >
+                      <XIcon aria-hidden="true" />
+                    </Button>
+                  ) : null}
+                </div>
+                {contentUploadProgress !== null ? (
+                  <div className="grid gap-1" aria-live="polite">
+                    <div className="flex items-center justify-between text-xs">
+                      <span>Đang tải nội dung</span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {contentUploadProgress}%
+                      </span>
+                    </div>
+                    <Progress
+                      value={contentUploadProgress}
+                      aria-label={`Tiến trình tải nội dung ${contentUploadProgress}%`}
+                    />
+                  </div>
+                ) : null}
               </div>
             )}
 
@@ -516,59 +742,119 @@ export function LessonDialog({
                   Tài liệu đính kèm
                 </label>
                 <p className="text-muted-foreground mt-1 text-xs">
-                  PDF, ZIP, TXT, CSV, DOCX hoặc PPTX · tối đa 10 file.
+                  Video, PDF, DOCX hoặc hình ảnh · tối đa {MAX_LESSON_RESOURCES} file. Video tối đa
+                  50MB, tài liệu 50MB và ảnh 10MB.
                 </p>
               </div>
 
-              {(resources.length > 0 || resourceFiles.length > 0) && (
+              {(resources.length > 0 || pendingResourceUploads.length > 0) && (
                 <ul className="grid gap-2">
-                  {resources.map((resource) => (
-                    <li
-                      key={resource.id}
-                      className="border-border flex items-center gap-3 rounded-lg border px-3 py-2"
-                    >
-                      <PaperclipIcon
-                        className="text-muted-foreground size-4 shrink-0"
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1 text-sm">
-                        <span className="block truncate font-medium">{resource.name}</span>
-                        <span className="text-muted-foreground text-xs">
-                          {formatFileSize(resource.fileSizeBytes)}
-                        </span>
-                      </span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Xoá ${resource.name}`}
-                        disabled={deletingResourceId === resource.id}
-                        onClick={() => void removeResource(resource)}
+                  {resources.map((resource) => {
+                    const ResourceIcon = resourceIcon(resource.mimeType);
+                    return (
+                      <li
+                        key={resource.id}
+                        className="border-border flex items-center gap-3 rounded-lg border px-3 py-2"
                       >
-                        {deletingResourceId === resource.id ? (
-                          <Loader2Icon className="animate-spin" aria-hidden="true" />
-                        ) : (
-                          <Trash2Icon aria-hidden="true" />
-                        )}
-                      </Button>
-                    </li>
-                  ))}
-                  {resourceFiles.map((file) => (
-                    <li
-                      key={`${file.name}-${file.lastModified}`}
-                      className="border-primary/20 bg-primary/5 flex items-center gap-3 rounded-lg border px-3 py-2"
-                    >
-                      <PaperclipIcon className="text-primary size-4 shrink-0" aria-hidden="true" />
-                      <span className="min-w-0 flex-1 truncate text-sm">{file.name}</span>
-                      <span className="text-muted-foreground text-xs">Mới</span>
-                    </li>
-                  ))}
+                        <ResourceIcon
+                          className="text-muted-foreground size-4 shrink-0"
+                          aria-hidden="true"
+                        />
+                        <span className="min-w-0 flex-1 text-sm">
+                          <span className="block truncate font-medium">{resource.name}</span>
+                          <span className="text-muted-foreground text-xs">
+                            {formatFileSize(resource.fileSizeBytes)}
+                          </span>
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={`Xoá ${resource.name}`}
+                          disabled={isSaving || deletingResourceId === resource.id}
+                          onClick={() => void removeResource(resource)}
+                        >
+                          {deletingResourceId === resource.id ? (
+                            <Loader2Icon className="animate-spin" aria-hidden="true" />
+                          ) : (
+                            <Trash2Icon aria-hidden="true" />
+                          )}
+                        </Button>
+                      </li>
+                    );
+                  })}
+                  {pendingResourceUploads.map((pendingUpload) => {
+                    const ResourceIcon = resourceIcon(pendingUpload.file.type);
+                    const isUploading = pendingUpload.status === "uploading";
+                    const hasError =
+                      pendingUpload.status === "error" || pendingUpload.status === "cancelled";
+                    return (
+                      <li
+                        key={pendingUpload.id}
+                        className="border-primary/20 bg-primary/5 grid gap-2 rounded-lg border px-3 py-2"
+                      >
+                        <div className="flex items-center gap-3">
+                          <ResourceIcon
+                            className="text-primary size-4 shrink-0"
+                            aria-hidden="true"
+                          />
+                          <span className="min-w-0 flex-1 text-sm">
+                            <span className="block truncate font-medium">
+                              {pendingUpload.file.name}
+                            </span>
+                            <span className="text-muted-foreground text-xs">
+                              {formatFileSize(pendingUpload.file.size)}
+                              {isUploading ? ` · ${pendingUpload.progress}%` : " · Chờ tải lên"}
+                            </span>
+                          </span>
+                          {hasError ? (
+                            <CircleAlertIcon
+                              className="text-destructive size-4"
+                              aria-hidden="true"
+                            />
+                          ) : pendingUpload.progress === 100 ? (
+                            <CircleCheckIcon className="text-success size-4" aria-hidden="true" />
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={
+                              isUploading
+                                ? `Huỷ tải ${pendingUpload.file.name}`
+                                : `Bỏ ${pendingUpload.file.name}`
+                            }
+                            disabled={isCancelling && activeUploadId === pendingUpload.id}
+                            onClick={() => removePendingUpload(pendingUpload.id)}
+                          >
+                            {isCancelling && activeUploadId === pendingUpload.id ? (
+                              <Loader2Icon className="animate-spin" aria-hidden="true" />
+                            ) : (
+                              <XIcon aria-hidden="true" />
+                            )}
+                          </Button>
+                        </div>
+                        {isUploading ? (
+                          <Progress
+                            value={pendingUpload.progress}
+                            aria-label={`Tiến trình tải ${pendingUpload.file.name}: ${pendingUpload.progress}%`}
+                          />
+                        ) : null}
+                        {pendingUpload.error ? (
+                          <p className="text-destructive text-xs" role="alert">
+                            {pendingUpload.error}
+                          </p>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
 
               <label
                 htmlFor="lesson-resources"
-                className="border-border hover:bg-muted flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed px-3 text-sm transition-colors"
+                aria-disabled={isSaving}
+                className="border-border hover:bg-muted flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed px-3 text-sm transition-colors aria-disabled:pointer-events-none aria-disabled:opacity-50"
               >
                 <PaperclipIcon aria-hidden="true" />
                 Chọn tài liệu
@@ -576,11 +862,13 @@ export function LessonDialog({
                   id="lesson-resources"
                   type="file"
                   multiple
-                  accept=".pdf,.zip,.txt,.csv,.docx,.pptx"
+                  disabled={isSaving}
+                  accept={LESSON_RESOURCE_ACCEPT}
                   className="sr-only"
-                  onChange={(event) =>
-                    chooseResourceFiles(Array.from(event.currentTarget.files ?? []))
-                  }
+                  onChange={(event) => {
+                    chooseResourceFiles(Array.from(event.currentTarget.files ?? []));
+                    event.currentTarget.value = "";
+                  }}
                 />
               </label>
             </div>
@@ -591,10 +879,11 @@ export function LessonDialog({
           <Button
             type="button"
             variant="outline"
-            disabled={isSaving}
-            onClick={() => onOpenChange(false)}
+            disabled={isSaving && (!activeUploadId || isCancelling)}
+            onClick={() => (isSaving ? void cancelActiveUpload() : onOpenChange(false))}
           >
-            Huỷ
+            {isCancelling ? <Loader2Icon className="animate-spin" aria-hidden="true" /> : null}
+            {isSaving ? "Huỷ tải lên" : "Huỷ"}
           </Button>
           <Button type="submit" form="lesson-form" disabled={isSaving}>
             {isSaving ? <Loader2Icon className="animate-spin" aria-hidden="true" /> : null}

@@ -115,6 +115,7 @@ export async function getLearningPageData(
       .from("lesson_resources")
       .select("id, name, storage_path, file_size_bytes, mime_type, sort_order")
       .eq("lesson_id", lessonId)
+      .eq("upload_status", "ready")
       .order("sort_order", { ascending: true }),
   ]);
 

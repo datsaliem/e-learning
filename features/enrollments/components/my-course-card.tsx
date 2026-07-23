@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { PlayCircleIcon } from "lucide-react";
+import { AwardIcon, PlayCircleIcon } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge, type badgeVariants } from "@/components/ui/badge";
@@ -78,14 +78,28 @@ export function MyCourseCard({ enrollment }: { enrollment: MyCourseEnrollment })
             </p>
           )}
 
-          <Button
-            size="sm"
-            className="mt-auto self-start"
-            nativeButton={false}
-            render={<Link href={`/courses/${enrollment.courseSlug}`} />}
-          >
-            {CTA_LABEL[enrollment.status]}
-          </Button>
+          <div className="mt-auto flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              nativeButton={false}
+              render={<Link href={`/courses/${enrollment.courseSlug}`} />}
+            >
+              {CTA_LABEL[enrollment.status]}
+            </Button>
+            {enrollment.certificateCode && (
+              <Button
+                size="sm"
+                variant="outline"
+                nativeButton={false}
+                render={
+                  <Link href={`/certificates/${encodeURIComponent(enrollment.certificateCode)}`} />
+                }
+              >
+                <AwardIcon data-icon="inline-start" aria-hidden="true" />
+                Xem chứng chỉ
+              </Button>
+            )}
+          </div>
         </CardContent>
       </div>
     </Card>

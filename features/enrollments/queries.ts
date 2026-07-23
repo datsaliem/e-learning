@@ -51,16 +51,21 @@ export async function getMyCourses(): Promise<MyCourseEnrollment[]> {
   try {
     const supabase = await createClient();
 
-    const [{ data: enrollments }, { data: progressRows }] = await Promise.all([
-      supabase
-        .from("enrollments")
-        .select("id, course_id, enrolled_at, expires_at")
-        .eq("student_id", user.id),
-      supabase
-        .from("lesson_progress")
-        .select("course_id, lesson_id, completed, updated_at")
-        .eq("student_id", user.id),
-    ]);
+    const [{ data: enrollments }, { data: progressRows }, { data: certificates }] =
+      await Promise.all([
+        supabase
+          .from("enrollments")
+          .select("id, course_id, enrolled_at, expires_at, progress_percent")
+          .eq("student_id", user.id),
+        supabase
+          .from("lesson_progress")
+          .select("course_id, lesson_id, completed, updated_at")
+          .eq("student_id", user.id),
+        supabase
+          .from("certificates")
+          .select("enrollment_id, certificate_code")
+          .eq("student_id", user.id),
+      ]);
 
     if (!enrollments || enrollments.length === 0) {
       return [];
@@ -72,6 +77,13 @@ export async function getMyCourses(): Promise<MyCourseEnrollment[]> {
       list.push(row);
       progressByCourse.set(row.course_id, list);
     }
+
+    const certificateByEnrollment = new Map(
+      (certificates ?? []).map((certificate) => [
+        certificate.enrollment_id,
+        certificate.certificate_code,
+      ]),
+    );
 
     const now = Date.now();
     const results: MyCourseEnrollment[] = [];
@@ -88,8 +100,12 @@ export async function getMyCourses(): Promise<MyCourseEnrollment[]> {
       );
       const rows = progressByCourse.get(enrollment.course_id) ?? [];
       const completedCount = rows.filter((row) => row.completed).length;
-      const progressPercent =
+      const calculatedProgressPercent =
         totalLessons > 0 ? Math.round((completedCount / totalLessons) * 100) : 0;
+      const progressPercent = Math.min(
+        100,
+        Math.max(0, Number(enrollment.progress_percent ?? calculatedProgressPercent)),
+      );
 
       const lastRow = [...rows].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))[0];
       const lastLesson = lastRow
@@ -99,11 +115,13 @@ export async function getMyCourses(): Promise<MyCourseEnrollment[]> {
         : undefined;
 
       const isExpired = !!enrollment.expires_at && new Date(enrollment.expires_at).getTime() < now;
-      const status: EnrollmentStatus = isExpired
-        ? "expired"
-        : progressPercent >= 100
+      const certificateCode = certificateByEnrollment.get(enrollment.id) ?? null;
+      const status: EnrollmentStatus =
+        certificateCode || progressPercent >= 100
           ? "completed"
-          : "in_progress";
+          : isExpired
+            ? "expired"
+            : "in_progress";
 
       results.push({
         enrollmentId: enrollment.id,
@@ -120,6 +138,7 @@ export async function getMyCourses(): Promise<MyCourseEnrollment[]> {
         enrolledAt: enrollment.enrolled_at,
         expiresAt: enrollment.expires_at,
         status,
+        certificateCode,
       });
     }
 

@@ -4,6 +4,9 @@ import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { Toaster } from "@/components/ui/sonner";
 import { getCurrentUser } from "@/features/auth/queries";
+import { CartDrawer } from "@/features/cart/components/cart-drawer";
+import { CartProvider } from "@/features/cart/components/cart-provider";
+import { getInitialCart } from "@/features/cart/queries";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,16 +33,20 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const user = await getCurrentUser();
+  const initialCart = user ? await getInitialCart(user.id) : [];
 
   return (
     <html lang="vi" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
-        <SiteHeader
-          user={user ? { name: user.fullName ?? user.email, email: user.email } : undefined}
-        />
-        <main className="flex flex-1 flex-col">{children}</main>
-        <SiteFooter />
-        <Toaster />
+        <CartProvider userId={user?.id ?? null} initialItems={initialCart}>
+          <SiteHeader
+            user={user ? { name: user.fullName ?? user.email, email: user.email } : undefined}
+          />
+          <main className="flex flex-1 flex-col">{children}</main>
+          <SiteFooter />
+          <CartDrawer />
+          <Toaster />
+        </CartProvider>
       </body>
     </html>
   );

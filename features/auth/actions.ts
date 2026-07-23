@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { env } from "@/lib/env";
 import { dashboardPathForRole } from "@/features/auth/queries";
+import { safeNextPath } from "@/features/auth/utils";
 import {
   forgotPasswordSchema,
   loginSchema,
@@ -37,7 +38,7 @@ function mapAuthError(message: string): string {
   return known[message] ?? "Đã có lỗi xảy ra, vui lòng thử lại.";
 }
 
-export async function signIn(input: LoginInput): Promise<ActionResult> {
+export async function signIn(input: LoginInput, nextPath?: string): Promise<ActionResult> {
   const parsed = loginSchema.safeParse(input);
   if (!parsed.success) {
     return { error: "Dữ liệu không hợp lệ." };
@@ -59,7 +60,7 @@ export async function signIn(input: LoginInput): Promise<ActionResult> {
   const role = (profile?.role as UserRole | undefined) ?? "student";
 
   revalidatePath("/", "layout");
-  redirect(dashboardPathForRole(role));
+  redirect(safeNextPath(nextPath) ?? dashboardPathForRole(role));
 }
 
 export async function signUp(input: RegisterInput): Promise<ActionResult> {

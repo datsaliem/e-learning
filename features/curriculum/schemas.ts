@@ -57,11 +57,4 @@ export const lessonContentSchema = z.object({
   }),
 });
 
-export const newResourceSchema = z.object({
-  name: z.string().trim().min(1).max(255),
-  storagePath: z.string().min(1).max(1024),
-  fileSizeBytes: z.number().int().min(0).max(52_428_800),
-  mimeType: z.string().min(1).max(255),
-});
-
 export type LessonFormInput = z.infer<typeof lessonFormSchema>;

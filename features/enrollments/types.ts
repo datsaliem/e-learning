@@ -15,4 +15,5 @@ export interface MyCourseEnrollment {
   enrolledAt: string;
   expiresAt: string | null;
   status: EnrollmentStatus;
+  certificateCode: string | null;
 }

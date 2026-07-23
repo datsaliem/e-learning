@@ -7,15 +7,22 @@ import { AuthCard } from "@/features/auth/components/auth-card";
 import { AuthStatusToast } from "@/features/auth/components/auth-status-toast";
 import { LoginForm } from "@/features/auth/components/login-form";
 import { dashboardPathForRole, getCurrentUser } from "@/features/auth/queries";
+import { safeNextPath } from "@/features/auth/utils";
 
 export const metadata: Metadata = {
   title: "Đăng nhập",
 };
 
-export default async function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next } = await searchParams;
+  const nextPath = safeNextPath(next);
   const user = await getCurrentUser();
   if (user) {
-    redirect(dashboardPathForRole(user.role));
+    redirect(nextPath ?? dashboardPathForRole(user.role));
   }
 
   return (
@@ -35,7 +42,7 @@ export default async function LoginPage() {
           </p>
         }
       >
-        <LoginForm />
+        <LoginForm nextPath={nextPath ?? undefined} />
       </AuthCard>
     </>
   );

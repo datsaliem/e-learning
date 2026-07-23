@@ -4,6 +4,7 @@ import { CourseCategoriesNav } from "@/components/layout/course-categories-nav";
 import { AuthActions } from "@/components/layout/auth-actions";
 import { UserNav, type UserNavProps } from "@/components/layout/user-nav";
 import { MobileNav } from "@/components/layout/mobile-nav";
+import { CartTrigger } from "@/features/cart/components/cart-trigger";
 
 export interface SiteHeaderProps {
   /** Khi có giá trị, hiển thị menu tài khoản thay cho nút đăng nhập/đăng ký. */
@@ -24,6 +25,7 @@ export function SiteHeader({ user }: SiteHeaderProps) {
         <SearchForm className="hidden max-w-sm md:ml-auto md:block" />
 
         <div className="ml-auto flex items-center gap-2 md:ml-0">
+          <CartTrigger />
           {user ? <UserNav {...user} /> : <AuthActions className="hidden md:flex" />}
         </div>
       </div>

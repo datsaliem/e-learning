@@ -7,18 +7,17 @@ import { createClient } from "@/lib/supabase/server";
 import {
   lessonContentSchema,
   lessonMutationSchema,
-  newResourceSchema,
   sectionSchema,
   type LessonFormInput,
 } from "@/features/curriculum/schemas";
 import type {
   CurriculumActionResult,
   CurriculumLessonType,
-  CurriculumResource,
   LessonContentMutationInput,
   LessonMutationData,
-  NewResourceInput,
 } from "@/features/curriculum/types";
+import { validateLessonContentMetadata } from "@/features/lesson-resources/config";
+import { isEditableCourseStatus, type CourseWorkflowStatus } from "@/types/course";
 
 const SESSION_ERROR = "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.";
 const PERMISSION_ERROR = "Bạn không có quyền quản lý nội dung khoá học này.";
@@ -131,11 +130,11 @@ async function ownsCourse(
 ): Promise<boolean> {
   const { data } = await supabase
     .from("courses")
-    .select("id")
+    .select("id, status")
     .eq("id", courseId)
     .eq("instructor_id", instructorId)
     .maybeSingle();
-  return Boolean(data);
+  return Boolean(data && isEditableCourseStatus(data.status as CourseWorkflowStatus));
 }
 
 export async function createSection(
@@ -367,6 +366,26 @@ export async function updateLessonContent(
     return { error: "Loại file không khớp với bài học." };
   }
 
+  const { data: objectInfo, error: infoError } = await supabase.storage
+    .from("course-content")
+    .info(input.storagePath);
+  const fileName = input.storagePath.split("/").at(-1) ?? "file";
+  const metadataError =
+    infoError || objectInfo?.size === undefined || !objectInfo.contentType
+      ? "Không thể xác minh file nội dung đã tải lên."
+      : validateLessonContentMetadata(
+          {
+            name: fileName,
+            mimeType: objectInfo.contentType,
+            fileSizeBytes: objectInfo.size,
+          },
+          input.lessonType,
+        );
+  if (metadataError) {
+    await removeStoragePaths(supabase, [input.storagePath]);
+    return { error: metadataError };
+  }
+
   const oldPath = input.lessonType === "video" ? lesson.video_path : lesson.content_path;
   const values =
     input.lessonType === "video"
@@ -385,121 +404,6 @@ export async function updateLessonContent(
 
   revalidateCurriculum(courseId);
   return { data: { storagePath: input.storagePath } };
-}
-
-export async function addLessonResources(
-  courseId: string,
-  lessonId: string,
-  resources: NewResourceInput[],
-): Promise<CurriculumActionResult<CurriculumResource[]>> {
-  const ids = z.object({ courseId: z.string().uuid(), lessonId: z.string().uuid() }).safeParse({
-    courseId,
-    lessonId,
-  });
-  const parsedResources = newResourceSchema.array().max(10).safeParse(resources);
-  if (!ids.success || !parsedResources.success || parsedResources.data.length === 0) {
-    return { error: "Danh sách tài liệu không hợp lệ." };
-  }
-  if (
-    parsedResources.data.some(
-      (resource) => !isPathInsideLesson(resource.storagePath, courseId, lessonId, "resources"),
-    )
-  ) {
-    return { error: "Đường dẫn tài liệu không hợp lệ." };
-  }
-
-  const context = await getInstructorContext();
-  if (!context.ok) return { error: context.error };
-  const { supabase, user } = context;
-  if (!(await ownsCourse(supabase, courseId, user.id))) return { error: PERMISSION_ERROR };
-
-  const { data: lesson } = await supabase
-    .from("lessons")
-    .select("id")
-    .eq("id", lessonId)
-    .eq("course_id", courseId)
-    .maybeSingle();
-  if (!lesson) return { error: PERMISSION_ERROR };
-
-  const { data: lastResource } = await supabase
-    .from("lesson_resources")
-    .select("sort_order")
-    .eq("lesson_id", lessonId)
-    .order("sort_order", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const firstSortOrder = (lastResource?.sort_order ?? -1) + 1;
-  const rows = parsedResources.data.map((resource, index) => ({
-    lesson_id: lessonId,
-    name: resource.name,
-    storage_path: resource.storagePath,
-    file_size_bytes: resource.fileSizeBytes,
-    mime_type: resource.mimeType,
-    sort_order: firstSortOrder + index,
-    position: firstSortOrder + index,
-  }));
-
-  const { data, error } = await supabase
-    .from("lesson_resources")
-    .insert(rows)
-    .select("id, lesson_id, name, storage_path, file_size_bytes, mime_type, sort_order");
-  if (error || !data) return { error: "Không thể lưu tài liệu đính kèm." };
-
-  revalidateCurriculum(courseId);
-  return {
-    data: data.map((resource) => ({
-      id: resource.id,
-      lessonId: resource.lesson_id,
-      name: resource.name,
-      storagePath: resource.storage_path,
-      fileSizeBytes: resource.file_size_bytes === null ? null : Number(resource.file_size_bytes),
-      mimeType: resource.mime_type,
-      sortOrder: resource.sort_order,
-    })),
-  };
-}
-
-export async function deleteLessonResource(
-  courseId: string,
-  lessonId: string,
-  resourceId: string,
-): Promise<CurriculumActionResult<{ resourceId: string }>> {
-  const ids = z
-    .object({
-      courseId: z.string().uuid(),
-      lessonId: z.string().uuid(),
-      resourceId: z.string().uuid(),
-    })
-    .safeParse({ courseId, lessonId, resourceId });
-  if (!ids.success) return { error: "Tài liệu không hợp lệ." };
-
-  const context = await getInstructorContext();
-  if (!context.ok) return { error: context.error };
-  const { supabase, user } = context;
-  if (!(await ownsCourse(supabase, courseId, user.id))) return { error: PERMISSION_ERROR };
-
-  const { data: lesson } = await supabase
-    .from("lessons")
-    .select("id")
-    .eq("id", lessonId)
-    .eq("course_id", courseId)
-    .maybeSingle();
-  if (!lesson) return { error: PERMISSION_ERROR };
-
-  const { data: resource } = await supabase
-    .from("lesson_resources")
-    .select("id, storage_path")
-    .eq("id", resourceId)
-    .eq("lesson_id", lessonId)
-    .maybeSingle();
-  if (!resource) return { error: "Không tìm thấy tài liệu." };
-
-  const { error } = await supabase.from("lesson_resources").delete().eq("id", resourceId);
-  if (error) return { error: "Không thể xoá tài liệu." };
-  await removeStoragePaths(supabase, [resource.storage_path]);
-
-  revalidateCurriculum(courseId);
-  return { data: { resourceId } };
 }
 
 export async function deleteLesson(

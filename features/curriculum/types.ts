@@ -1,5 +1,3 @@
-import type { LessonFormInput } from "@/features/curriculum/schemas";
-
 export type CurriculumLessonType = "video" | "text" | "pdf" | "external_link";
 
 export interface CurriculumResource {
@@ -42,17 +40,4 @@ export type CurriculumActionResult<T> = { data: T } | { error: string };
 export interface LessonContentMutationInput {
   lessonType: Extract<CurriculumLessonType, "video" | "pdf">;
   storagePath: string;
-}
-
-export interface NewResourceInput {
-  name: string;
-  storagePath: string;
-  fileSizeBytes: number;
-  mimeType: string;
-}
-
-export interface LessonDialogSubmitInput {
-  values: LessonFormInput;
-  contentFile: File | null;
-  resourceFiles: File[];
 }

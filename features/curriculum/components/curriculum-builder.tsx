@@ -129,6 +129,7 @@ function SortableLesson({
       <button
         type="button"
         onClick={onEdit}
+        disabled={disabled}
         className="focus-visible:ring-ring min-w-0 flex-1 rounded-md text-left outline-none focus-visible:ring-3"
       >
         <span className="block truncate text-sm font-medium">{lesson.title}</span>
@@ -157,6 +158,7 @@ function SortableLesson({
               variant="ghost"
               size="icon-sm"
               aria-label={`Thao tác với ${lesson.title}`}
+              disabled={disabled}
             />
           }
         >
@@ -242,6 +244,7 @@ function SortableSection({
                 variant="ghost"
                 size="icon-sm"
                 aria-label={`Thao tác với section ${section.title}`}
+                disabled={disabled}
               />
             }
           >
@@ -285,6 +288,7 @@ function SortableSection({
           <button
             type="button"
             onClick={onAddLesson}
+            disabled={disabled}
             className="border-border text-muted-foreground hover:bg-muted focus-visible:ring-ring flex min-h-20 items-center justify-center gap-2 rounded-xl border border-dashed text-sm outline-none focus-visible:ring-3"
           >
             <PlusIcon aria-hidden="true" />
@@ -293,7 +297,13 @@ function SortableSection({
         )}
 
         {section.lessons.length > 0 && (
-          <Button type="button" variant="ghost" className="justify-start" onClick={onAddLesson}>
+          <Button
+            type="button"
+            variant="ghost"
+            className="justify-start"
+            disabled={disabled}
+            onClick={onAddLesson}
+          >
             <PlusIcon aria-hidden="true" />
             Thêm bài học
           </Button>
@@ -317,9 +327,11 @@ interface LessonDialogState {
 export function CurriculumBuilder({
   courseId,
   initialSections,
+  readOnly = false,
 }: {
   courseId: string;
   initialSections: CurriculumSection[];
+  readOnly?: boolean;
 }) {
   const [sections, setSections] = React.useState(() => normalizeSections(initialSections));
   const [sectionDialog, setSectionDialog] = React.useState<SectionDialogState>({
@@ -345,6 +357,7 @@ export function CurriculumBuilder({
   );
 
   function openSectionDialog(section: CurriculumSection | null) {
+    if (readOnly) return;
     setSectionTitle(section?.title ?? "");
     setSectionDialog({ open: true, section });
   }
@@ -469,6 +482,7 @@ export function CurriculumBuilder({
   }
 
   async function handleDragEnd(event: DragEndEvent) {
+    if (readOnly) return;
     const source = event.operation.source;
     if (!source || event.canceled) return;
 
@@ -531,7 +545,7 @@ export function CurriculumBuilder({
     }
   }
 
-  const disabled = isReordering || deletingId !== null;
+  const disabled = readOnly || isReordering || deletingId !== null;
 
   return (
     <section className="mx-auto w-full max-w-6xl px-4 pb-12" aria-labelledby="curriculum-heading">
@@ -543,10 +557,12 @@ export function CurriculumBuilder({
               Curriculum
             </CardTitle>
             <CardDescription className="mt-1">
-              Kéo section hoặc bài học để sắp xếp. Thứ tự được lưu tự động.
+              {readOnly
+                ? "Nội dung đang ở chế độ chỉ đọc theo trạng thái kiểm duyệt."
+                : "Kéo section hoặc bài học để sắp xếp. Thứ tự được lưu tự động."}
             </CardDescription>
           </div>
-          <Button type="button" onClick={() => openSectionDialog(null)}>
+          <Button type="button" disabled={readOnly} onClick={() => openSectionDialog(null)}>
             <PlusIcon aria-hidden="true" />
             Tạo section
           </Button>
@@ -582,7 +598,12 @@ export function CurriculumBuilder({
               <p className="text-muted-foreground mt-1 max-w-md text-sm">
                 Tạo section đầu tiên, sau đó thêm video, văn bản, PDF hoặc liên kết ngoài.
               </p>
-              <Button type="button" className="mt-5" onClick={() => openSectionDialog(null)}>
+              <Button
+                type="button"
+                className="mt-5"
+                disabled={readOnly}
+                onClick={() => openSectionDialog(null)}
+              >
                 <PlusIcon aria-hidden="true" />
                 Tạo section đầu tiên
               </Button>
@@ -666,7 +687,7 @@ export function CurriculumBuilder({
         </DialogContent>
       </Dialog>
 
-      {lessonDialog.open && (
+      {lessonDialog.open && !readOnly && (
         <LessonDialog
           open={lessonDialog.open}
           onOpenChange={(open) => setLessonDialog((current) => ({ ...current, open }))}
