@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { createClient } from "@/lib/supabase/server";
+import { isUuid } from "@/lib/uuid";
 import { cartCourseIdSchema, cartCourseIdsSchema } from "@/features/cart/schemas";
 import { getCartCourseById, getCartCoursesByIds } from "@/features/cart/services";
 import type { CartActionResult, CartCourse, CartSyncResult } from "@/features/cart/types";
@@ -63,7 +64,8 @@ export async function resolveGuestCart(
   const parsed = cartCourseIdsSchema.safeParse(courseIds);
   if (!parsed.success) return { error: "Dữ liệu giỏ hàng không hợp lệ." };
 
-  return { data: await getCartCoursesByIds([...new Set(parsed.data)]) };
+  const items = await getCartCoursesByIds([...new Set(parsed.data)]);
+  return { data: items.filter((item) => isUuid(item.id)) };
 }
 
 export async function addCartItem(
@@ -71,6 +73,9 @@ export async function addCartItem(
 ): Promise<CartActionResult<{ item: CartCourse; added: boolean }>> {
   const parsed = cartCourseIdSchema.safeParse(courseId);
   if (!parsed.success) return { error: "Khoá học không hợp lệ.", code: "unavailable" };
+  if (!isUuid(parsed.data)) {
+    return { error: "Khoá học minh hoạ chưa mở bán.", code: "unavailable" };
+  }
 
   const context = await getCartContext();
   if (!context.ok) {
@@ -162,7 +167,7 @@ export async function syncGuestCart(
 
   const existingIds = (existingRows ?? []).map((row) => row.course_id);
   const allIds = [...new Set([...existingIds, ...guestIds])];
-  const resolvedItems = await getCartCoursesByIds(allIds);
+  const resolvedItems = (await getCartCoursesByIds(allIds)).filter((item) => isUuid(item.id));
   const availableIds = new Set(resolvedItems.map((item) => item.id));
 
   let ownedIds: Set<string>;

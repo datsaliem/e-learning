@@ -1,12 +1,11 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
+import { isUuid } from "@/lib/uuid";
 import { COURSE_CATEGORY_OPTIONS } from "@/features/course-builder/constants";
 import { getCourseById } from "@/features/courses/services";
 import { courseToCartCourse } from "@/features/cart/utils";
 import type { CartCourse } from "@/features/cart/types";
-
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function categoryLabel(category: string | null): string {
   return (
@@ -34,7 +33,7 @@ export async function getCartCoursesByIds(courseIds: string[]): Promise<CartCour
     mockEntries.filter((entry): entry is NonNullable<typeof entry> => entry !== null),
   );
 
-  const databaseIds = uniqueIds.filter((id) => !coursesById.has(id) && UUID_PATTERN.test(id));
+  const databaseIds = uniqueIds.filter((id) => !coursesById.has(id) && isUuid(id));
   if (databaseIds.length > 0) {
     const supabase = await createClient();
     const { data } = await supabase

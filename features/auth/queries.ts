@@ -1,6 +1,6 @@
 import "server-only";
 
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 
 import type { UserRole } from "@/features/auth/types";
 import { isSupabaseConfigured } from "@/lib/env";
@@ -34,7 +34,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       .from("profiles")
       .select("full_name, role")
       .eq("id", user.id)
-      .single();
+      .maybeSingle();
 
     return {
       id: user.id,
@@ -42,7 +42,10 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       fullName: profile?.full_name ?? null,
       role: (profile?.role as UserRole | undefined) ?? "student",
     };
-  } catch {
+  } catch (error) {
+    // Không nuốt lỗi nội bộ mà Next.js dùng để chuyển route sang dynamic rendering.
+    // Nếu bị catch, các trang theo session sẽ bị prerender thành redirect /login vĩnh viễn.
+    unstable_rethrow(error);
     return null;
   }
 }

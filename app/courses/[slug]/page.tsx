@@ -50,8 +50,10 @@ export default async function CoursePage({ params }: CoursePageProps) {
       <CourseHero course={course} isAuthenticated={!!user} isEnrolled={isEnrolled} />
 
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-12">
-        <CourseObjectives objectives={course.objectives} />
-        <CourseRequirements requirements={course.requirements} />
+        {course.objectives.length > 0 && <CourseObjectives objectives={course.objectives} />}
+        {course.requirements.length > 0 && (
+          <CourseRequirements requirements={course.requirements} />
+        )}
         <CourseCurriculum curriculum={course.curriculum} />
         <InstructorBioCard instructor={course.instructorDetail} />
         <CourseReviews reviews={reviews} rating={course.rating} reviewCount={course.reviewCount} />

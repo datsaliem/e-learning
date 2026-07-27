@@ -27,6 +27,10 @@ export const metadata: Metadata = {
   description: "Nền tảng học trực tuyến E-Learning",
 };
 
+// Header và giỏ hàng phụ thuộc session cookie của từng request.
+// Không prerender layout thành trạng thái khách, nếu không user đã đăng nhập vẫn thấy redirect/login.
+export const dynamic = "force-dynamic";
+
 export default async function RootLayout({
   children,
 }: Readonly<{

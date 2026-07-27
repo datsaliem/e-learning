@@ -1,19 +1,21 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
+import { isUuid } from "@/lib/uuid";
 import { getCurrentUser } from "@/features/auth/queries";
 import { getCourseById } from "@/features/courses/services";
 import type { EnrollmentStatus, MyCourseEnrollment } from "@/features/enrollments/types";
 
 /**
  * Kiểm tra user hiện tại đã ghi danh khoá học chưa — truy vấn thật vào
- * bảng public.enrollments (xem supabase/migrations). Course trong dự án
- * hiện là mock data (id dạng "course-1", không phải uuid), nên khi chưa
- * nối Supabase thật hoặc chưa có khoá học thật trong DB, hàm này sẽ luôn
- * trả về false một cách an toàn thay vì lỗi — không chặn người dùng xem
- * trang.
+ * bảng public.enrollments (xem supabase/migrations). ID minh hoạ không phải
+ * UUID được loại trước khi gửi request để tránh truy vấn PostgREST lỗi 400.
  */
 export async function getEnrollmentStatus(courseId: string): Promise<boolean> {
+  if (!isUuid(courseId)) {
+    return false;
+  }
+
   const user = await getCurrentUser();
   if (!user) {
     return false;
@@ -37,8 +39,7 @@ export async function getEnrollmentStatus(courseId: string): Promise<boolean> {
 /**
  * Danh sách khoá học đã ghi danh của user hiện tại, ghép từ 2 bảng thật
  * (enrollments, lesson_progress) và làm giàu thông tin hiển thị (tiêu đề,
- * giảng viên, tổng số bài học...) từ catalog khoá học (hiện là mock — xem
- * ghi chú ở features/courses/services.ts). Enrollment nào tham chiếu
+ * giảng viên, tổng số bài học...) từ catalog khoá học. Enrollment nào tham chiếu
  * course_id không có trong catalog sẽ bị bỏ qua vì không đủ dữ liệu để
  * hiển thị thẻ khoá học.
  */

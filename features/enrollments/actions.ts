@@ -4,14 +4,13 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
 import { createClient } from "@/lib/supabase/server";
+import { isUuid } from "@/lib/uuid";
 import { getCurrentUser } from "@/features/auth/queries";
 import type { ActionResult } from "@/types/actions";
 
 /**
- * Ghi danh khoá học miễn phí, hoặc bắt đầu quy trình "mua" cho khoá trả phí.
- * Dự án chưa tích hợp cổng thanh toán — với khoá trả phí, hành động này ghi
- * danh trực tiếp; khi có cổng thanh toán thật, đây là chỗ điều hướng sang
- * bước checkout trước khi insert enrollment.
+ * Ghi danh trực tiếp chỉ dành cho khoá học thật, đã xuất bản và miễn phí.
+ * Khoá trả phí chỉ được tạo enrollment sau webhook thanh toán đã xác minh.
  */
 export async function enrollInCourse(courseId: string, courseSlug: string): Promise<ActionResult> {
   const user = await getCurrentUser();
@@ -19,7 +18,28 @@ export async function enrollInCourse(courseId: string, courseSlug: string): Prom
     redirect("/login");
   }
 
+  if (!isUuid(courseId)) {
+    return {
+      error: "Khoá học minh hoạ chưa mở ghi danh. Vui lòng chọn khoá học đã được xuất bản.",
+    };
+  }
+
   const supabase = await createClient();
+  const { data: course, error: courseError } = await supabase
+    .from("courses")
+    .select("id, price, sale_price")
+    .eq("id", courseId)
+    .eq("status", "published")
+    .maybeSingle();
+
+  if (courseError || !course) {
+    return { error: "Khoá học không còn mở ghi danh." };
+  }
+
+  if (Number(course.sale_price ?? course.price) > 0) {
+    return { error: "Khoá học trả phí cần được thanh toán trước khi ghi danh." };
+  }
+
   const { error } = await supabase
     .from("enrollments")
     .insert({ course_id: courseId, student_id: user.id });
@@ -34,4 +54,6 @@ export async function enrollInCourse(courseId: string, courseSlug: string): Prom
   }
 
   revalidatePath(`/courses/${courseSlug}`);
+  revalidatePath("/my-courses");
+  revalidatePath("/dashboard");
 }
