@@ -382,6 +382,11 @@ inspector_port = 8083
 # The Deno major version to use.
 deno_version = 2
 
+# Invoked only by pg_cron. The function validates a high-entropy token stored
+# in Supabase Vault before accessing the outbox.
+[functions.transactional-email-worker]
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
