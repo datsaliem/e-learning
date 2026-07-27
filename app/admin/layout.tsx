@@ -1,7 +1,13 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { requireRole } from "@/features/auth/queries";
 import { AdminSidebar } from "@/features/admin-dashboard/components/admin-sidebar";
+import { PRIVATE_ROBOTS_METADATA } from "@/features/seo/metadata";
+
+export const metadata: Metadata = {
+  robots: PRIVATE_ROBOTS_METADATA,
+};
 
 export const dynamic = "force-dynamic";
 

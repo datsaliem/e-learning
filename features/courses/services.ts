@@ -284,6 +284,8 @@ function mapPublishedCourse(row: PublishedCourseRow): Course {
     studentCount: Math.trunc(toSafeNumber(row.student_count)),
     durationHours: Math.round((toSafeNumber(row.duration_seconds) / 3600) * 10) / 10,
     lessonCount: Math.trunc(toSafeNumber(row.lesson_count)),
+    thumbnailUrl: row.thumbnail_url,
+    language: row.language,
     instructor: {
       id: row.instructor_id,
       name: row.instructor_name,

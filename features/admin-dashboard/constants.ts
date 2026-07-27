@@ -2,6 +2,7 @@ import {
   BarChart3Icon,
   BookOpenIcon,
   FolderTreeIcon,
+  Globe2Icon,
   HouseIcon,
   LayoutDashboardIcon,
   ShoppingCartIcon,
@@ -28,6 +29,11 @@ export const ADMIN_NAV_ITEMS = [
     label: "Danh mục",
     href: "/admin/categories",
     icon: FolderTreeIcon,
+  },
+  {
+    label: "SEO",
+    href: "/admin/seo",
+    icon: Globe2Icon,
   },
   {
     label: "Đơn hàng",

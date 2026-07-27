@@ -10,6 +10,9 @@ import { certificateCodeSchema } from "@/features/certificates/schemas";
 export const metadata: Metadata = {
   title: "Xác minh chứng chỉ",
   description: "Kiểm tra tính hợp lệ của chứng chỉ E-Learning bằng mã xác thực.",
+  alternates: {
+    canonical: "/certificates/verify",
+  },
 };
 
 export default async function VerifyCertificatePage({

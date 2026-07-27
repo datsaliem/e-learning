@@ -28,6 +28,9 @@ export async function generateMetadata({ params }: PublicInfoPageProps): Promise
   return {
     title: content.title,
     description: content.description,
+    alternates: {
+      canonical: `/${slug}`,
+    },
   };
 }
 

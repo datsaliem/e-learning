@@ -14,6 +14,9 @@ import { getCurrentUser } from "@/features/auth/queries";
 export const metadata: Metadata = {
   title: "Trở thành giảng viên",
   description: "Chuẩn bị hồ sơ và xây dựng khoá học của bạn trên E-Learning.",
+  alternates: {
+    canonical: "/instructors/apply",
+  },
 };
 
 const steps = [

@@ -1,14 +1,17 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { headers } from "next/headers";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
+import { JsonLd } from "@/components/seo/json-ld";
 import { Toaster } from "@/components/ui/sonner";
 import { getCurrentUser } from "@/features/auth/queries";
 import { CartDrawer } from "@/features/cart/components/cart-drawer";
 import { CartProvider } from "@/features/cart/components/cart-provider";
 import { getInitialCart } from "@/features/cart/queries";
 import { getNotificationSnapshot } from "@/features/notifications/queries";
+import { getPublicSeoSettings } from "@/features/seo/queries";
+import { buildOrganizationJsonLd } from "@/features/seo/structured-data";
+import { absoluteSiteUrl, getSiteUrl } from "@/lib/site-url";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -21,58 +24,55 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-const SITE_TITLE = "E-Learning";
-const SITE_DESCRIPTION =
-  "Học kỹ năng mới, tiến xa hơn trong sự nghiệp với các khóa học trực tuyến chất lượng.";
-
-function fallbackSiteUrl(): URL {
-  try {
-    return new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000");
-  } catch {
-    return new URL("http://localhost:3000");
-  }
-}
-
 export async function generateMetadata(): Promise<Metadata> {
-  const requestHeaders = await headers();
-  const forwardedHost = requestHeaders.get("x-forwarded-host")?.split(",")[0]?.trim();
-  const host = forwardedHost || requestHeaders.get("host");
-  const forwardedProtocol = requestHeaders.get("x-forwarded-proto")?.split(",")[0]?.trim();
-  const protocol = forwardedProtocol === "http" ? "http" : "https";
-  const siteUrl =
-    host && /^[a-z0-9.-]+(?::\d+)?$/i.test(host)
-      ? new URL(`${protocol}://${host}`)
-      : fallbackSiteUrl();
-  const socialImage = new URL("/og.png", siteUrl);
+  const [siteUrl, settings] = await Promise.all([getSiteUrl(), getPublicSeoSettings()]);
+  const socialImage = absoluteSiteUrl(settings.defaultOgImageUrl, siteUrl);
 
   return {
     metadataBase: siteUrl,
+    applicationName: settings.siteName,
     title: {
-      default: SITE_TITLE,
-      template: `%s | ${SITE_TITLE}`,
+      default: settings.siteName,
+      template: `%s | ${settings.siteName}`,
     },
-    description: SITE_DESCRIPTION,
+    description: settings.siteDescription,
+    robots: {
+      index: settings.indexSite,
+      follow: settings.followLinks,
+      nocache: !settings.indexSite,
+      googleBot: {
+        index: settings.indexSite,
+        follow: settings.followLinks,
+        "max-image-preview": "large",
+        "max-snippet": -1,
+        "max-video-preview": -1,
+      },
+    },
     openGraph: {
       type: "website",
       locale: "vi_VN",
       url: siteUrl,
-      siteName: SITE_TITLE,
-      title: SITE_TITLE,
-      description: SITE_DESCRIPTION,
+      siteName: settings.siteName,
+      title: settings.siteName,
+      description: settings.siteDescription,
       images: [
         {
           url: socialImage,
-          width: 1731,
-          height: 909,
-          alt: "E-Learning — Học kỹ năng mới, tiến xa hơn trong sự nghiệp",
+          alt: `${settings.siteName} — ${settings.siteDescription}`,
         },
       ],
     },
     twitter: {
       card: "summary_large_image",
-      title: SITE_TITLE,
-      description: SITE_DESCRIPTION,
+      title: settings.siteName,
+      description: settings.siteDescription,
       images: [socialImage],
+      ...(settings.twitterHandle
+        ? {
+            site: settings.twitterHandle,
+            creator: settings.twitterHandle,
+          }
+        : {}),
     },
   };
 }
@@ -86,7 +86,11 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const user = await getCurrentUser();
+  const [user, settings, siteUrl] = await Promise.all([
+    getCurrentUser(),
+    getPublicSeoSettings(),
+    getSiteUrl(),
+  ]);
   const userHeaderData = user
     ? await Promise.all([getInitialCart(user.id), getNotificationSnapshot(user.id)])
     : null;
@@ -96,6 +100,7 @@ export default async function RootLayout({
   return (
     <html lang="vi" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
+        <JsonLd id="organization-json-ld" data={buildOrganizationJsonLd(settings, siteUrl)} />
         <CartProvider userId={user?.id ?? null} initialItems={initialCart}>
           <SiteHeader
             user={

@@ -12,6 +12,9 @@ import { courseCategories } from "@/lib/nav-config";
 export const metadata: Metadata = {
   title: "Tất cả khoá học",
   description: "Khám phá các khoá học trực tuyến theo chủ đề, cấp độ và nhu cầu của bạn.",
+  alternates: {
+    canonical: "/courses",
+  },
 };
 
 interface CoursesPageProps {
