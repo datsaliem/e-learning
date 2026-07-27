@@ -8,6 +8,7 @@ import { getCurrentUser } from "@/features/auth/queries";
 import { CartDrawer } from "@/features/cart/components/cart-drawer";
 import { CartProvider } from "@/features/cart/components/cart-provider";
 import { getInitialCart } from "@/features/cart/queries";
+import { getNotificationSnapshot } from "@/features/notifications/queries";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -86,14 +87,27 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const user = await getCurrentUser();
-  const initialCart = user ? await getInitialCart(user.id) : [];
+  const userHeaderData = user
+    ? await Promise.all([getInitialCart(user.id), getNotificationSnapshot(user.id)])
+    : null;
+  const initialCart = userHeaderData?.[0] ?? [];
+  const notificationSnapshot = userHeaderData?.[1];
 
   return (
     <html lang="vi" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col">
         <CartProvider userId={user?.id ?? null} initialItems={initialCart}>
           <SiteHeader
-            user={user ? { name: user.fullName ?? user.email, email: user.email } : undefined}
+            user={
+              user
+                ? {
+                    id: user.id,
+                    name: user.fullName ?? user.email,
+                    email: user.email,
+                  }
+                : undefined
+            }
+            notificationSnapshot={notificationSnapshot}
           />
           <main className="flex flex-1 flex-col">{children}</main>
           <SiteFooter />
