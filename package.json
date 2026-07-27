@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "build:cloudflare": "opennextjs-cloudflare build",
+    "build:sites": "opennextjs-cloudflare build && node scripts/prepare-sites-build.mjs",
     "preview:cloudflare": "opennextjs-cloudflare preview",
     "start": "next start",
     "lint": "eslint",
