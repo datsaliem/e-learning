@@ -15,7 +15,7 @@ export const ADMIN_NAV_ITEMS = [
   },
   {
     label: "Người dùng",
-    href: "/admin/dashboard#users",
+    href: "/admin/users",
     icon: UsersIcon,
   },
   {
