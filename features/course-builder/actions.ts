@@ -59,12 +59,24 @@ export async function saveCourseDraft(
   }
 
   const { supabase, user } = context;
+  const { data: category, error: categoryError } = await supabase
+    .from("categories")
+    .select("id, slug")
+    .eq("slug", parsed.data.category)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (categoryError || !category) {
+    return { error: "Danh mục không tồn tại hoặc đã bị tắt. Vui lòng chọn danh mục khác." };
+  }
+
   const courseValues = {
     title: parsed.data.title.trim(),
     slug: parsed.data.slug.trim(),
     short_description: parsed.data.shortDescription.trim(),
     description: parsed.data.fullDescription.trim(),
-    category: parsed.data.category,
+    category: category.slug,
+    category_id: category.id,
     level: parsed.data.level,
     language: parsed.data.language.trim(),
     price: parsed.data.price,

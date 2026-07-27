@@ -47,7 +47,6 @@ import { CourseMediaField } from "@/features/course-builder/components/course-me
 import { CoursePreviewDialog } from "@/features/course-builder/components/course-preview-dialog";
 import { CourseReviewPanel } from "@/features/course-builder/components/course-review-panel";
 import {
-  COURSE_CATEGORY_OPTIONS,
   COURSE_LANGUAGE_OPTIONS,
   COURSE_LEVEL_OPTIONS,
   type CourseMediaKind,
@@ -60,10 +59,12 @@ import {
   type CourseBuilderInput,
 } from "@/features/course-builder/schemas";
 import type { CourseWorkflowStatus, OwnedCourseDraft } from "@/features/course-builder/types";
+import type { CourseCategoryOption } from "@/features/categories/types";
 import { isEditableCourseStatus } from "@/types/course";
 
 interface CourseBuilderFormProps {
   instructorName: string;
+  categoryOptions: CourseCategoryOption[];
   initialCourse?: OwnedCourseDraft;
 }
 
@@ -89,7 +90,7 @@ const EMPTY_COURSE: CourseBuilderInput = {
   slug: "",
   shortDescription: "",
   fullDescription: "",
-  category: "lap-trinh",
+  category: "",
   level: "beginner",
   language: "Tiếng Việt",
   thumbnailUrl: "",
@@ -98,7 +99,11 @@ const EMPTY_COURSE: CourseBuilderInput = {
   salePrice: undefined,
 };
 
-export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuilderFormProps) {
+export function CourseBuilderForm({
+  instructorName,
+  categoryOptions,
+  initialCourse,
+}: CourseBuilderFormProps) {
   const router = useRouter();
   const [courseId, setCourseId] = React.useState(initialCourse?.id ?? null);
   const [status, setStatus] = React.useState<CourseWorkflowStatus>(
@@ -132,7 +137,10 @@ export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuild
           price: initialCourse.price,
           salePrice: initialCourse.salePrice,
         }
-      : EMPTY_COURSE,
+      : {
+          ...EMPTY_COURSE,
+          category: categoryOptions[0]?.value ?? "",
+        },
   });
 
   const title = form.watch("title");
@@ -445,7 +453,7 @@ export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuild
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              {COURSE_CATEGORY_OPTIONS.map((option) => (
+                              {categoryOptions.map((option) => (
                                 <SelectItem key={option.value} value={option.value}>
                                   {option.label}
                                 </SelectItem>
@@ -683,6 +691,7 @@ export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuild
         thumbnailUrl={thumbnailPreview}
         trailerUrl={trailerPreview}
         instructorName={instructorName}
+        categoryOptions={categoryOptions}
       />
     </div>
   );

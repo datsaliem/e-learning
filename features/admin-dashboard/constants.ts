@@ -1,6 +1,7 @@
 import {
   BarChart3Icon,
   BookOpenIcon,
+  FolderTreeIcon,
   HouseIcon,
   LayoutDashboardIcon,
   ShoppingCartIcon,
@@ -22,6 +23,11 @@ export const ADMIN_NAV_ITEMS = [
     label: "Khóa học",
     href: "/admin/courses",
     icon: BookOpenIcon,
+  },
+  {
+    label: "Danh mục",
+    href: "/admin/categories",
+    icon: FolderTreeIcon,
   },
   {
     label: "Đơn hàng",

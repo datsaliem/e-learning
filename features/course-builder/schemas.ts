@@ -1,18 +1,12 @@
 import { z } from "zod";
 
 import {
-  COURSE_CATEGORY_OPTIONS,
   THUMBNAIL_ALLOWED_TYPES,
   THUMBNAIL_MAX_SIZE_BYTES,
   TRAILER_ALLOWED_TYPES,
   TRAILER_MAX_SIZE_BYTES,
   type CourseMediaKind,
 } from "@/features/course-builder/constants";
-
-const categoryValues = COURSE_CATEGORY_OPTIONS.map((option) => option.value) as [
-  (typeof COURSE_CATEGORY_OPTIONS)[number]["value"],
-  ...(typeof COURSE_CATEGORY_OPTIONS)[number]["value"][],
-];
 
 const optionalPublicUrl = z.union([z.literal(""), z.url("URL media không hợp lệ")]);
 
@@ -39,7 +33,12 @@ export const courseBuilderSchema = z
       .trim()
       .min(100, "Mô tả đầy đủ phải có ít nhất 100 ký tự")
       .max(10000, "Mô tả đầy đủ tối đa 10.000 ký tự"),
-    category: z.enum(categoryValues, { error: "Vui lòng chọn danh mục" }),
+    category: z
+      .string()
+      .trim()
+      .min(2, "Vui lòng chọn danh mục")
+      .max(100, "Danh mục không hợp lệ")
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Danh mục không hợp lệ"),
     level: z.enum(["beginner", "intermediate", "advanced"]),
     language: z.string().trim().min(2, "Vui lòng chọn ngôn ngữ").max(50),
     thumbnailUrl: optionalPublicUrl,
