@@ -23,7 +23,8 @@ Runbook này áp dụng cho project Vercel `e-learning-datsaliem` và Supabase
 - Ba Storage bucket tồn tại đúng loại: `avatars` và `course-media` public, `course-content`
   private. SELECT policy tối thiểu cho avatar/course media `upsert` đã được áp dụng.
 - Stripe route đã xác minh raw body + `Stripe-Signature`, giới hạn payload 1 MiB và xử lý
-  idempotent bằng `(provider, event_id)`. Chưa có live key/webhook signing secret trên Vercel.
+  idempotent bằng `(provider, event_id)`. Release hiện tại dùng `PAYMENT_PROVIDER=disabled`, nên
+  checkout hiển thị thông báo tạm đóng và webhook Stripe trả `503`; không dùng key giả.
 - Vercel Runtime Logs không có error/5xx trong cửa sổ audit. Source mới bổ sung structured error
   logging qua Next.js instrumentation và global error UI.
 - Supabase Edge Function `transactional-email-worker` đang active nhưng thiếu `RESEND_API_KEY`,
@@ -45,9 +46,9 @@ Runbook này áp dụng cho project Vercel `e-learning-datsaliem` và Supabase
 | `NEXT_PUBLIC_SUPABASE_URL`      | `https://pjevaqjgnlvjjgxesucl.supabase.co`                            |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Publishable key `sb_publishable_*`; được phép xuất hiện ở client      |
 | `SUPABASE_SECRET_KEY`           | Secret key `sb_secret_*`, chỉ server; legacy service role là fallback |
-| `PAYMENT_PROVIDER`              | `stripe`                                                              |
-| `STRIPE_SECRET_KEY`             | `sk_live_*` khi nhận thanh toán thật                                  |
-| `STRIPE_WEBHOOK_SECRET`         | `whsec_*` của đúng live webhook endpoint                              |
+| `PAYMENT_PROVIDER`              | `disabled`, hoặc `stripe` khi đã sẵn sàng nhận thanh toán             |
+| `STRIPE_SECRET_KEY`             | Bắt buộc với `stripe`; `sk_live_*` khi nhận thanh toán thật           |
+| `STRIPE_WEBHOOK_SECRET`         | Bắt buộc với `stripe`; `whsec_*` của đúng live webhook endpoint       |
 
 Không đặt `SUPABASE_SECRET_KEY`, service role, `sk_*`, `whsec_*` hoặc Resend key trong biến
 `NEXT_PUBLIC_*`.
@@ -68,7 +69,8 @@ Không dùng `vercel env run` cho audit này khi workspace có `.env.local`, vì
 ghi đè remote values và tạo kết quả sai.
 
 `vercel.json` dùng `npm run build:production`, vì vậy release mới sẽ fail-fast nếu thiếu hoặc còn
-placeholder.
+placeholder. Khi `PAYMENT_PROVIDER=disabled`, checker bỏ qua hai Stripe secret nhưng in cảnh báo
+rằng checkout đang tắt.
 
 ### Preview
 
@@ -142,6 +144,9 @@ Storage smoke test bằng ba tài khoản khác nhau:
 
 ## 4. Stripe webhook
 
+Release hiện tại chủ động tắt thanh toán. Chỉ thực hiện phần này trước khi đổi
+`PAYMENT_PROVIDER` từ `disabled` sang `stripe`; thêm đủ hai secret rồi redeploy.
+
 Tạo live webhook endpoint:
 
 ```text
@@ -211,7 +216,8 @@ giữ `noindex`.
 - [ ] `supabase db push --dry-run` không còn migration chờ.
 - [ ] Storage upload/upsert/read-deny test đạt.
 - [ ] Supabase Security Advisor đã review; leaked-password protection bật hoặc có risk acceptance.
-- [ ] Stripe live webhook, events, secret và API version đúng.
+- [ ] Stripe live webhook, events, secret và API version đúng, hoặc release record xác nhận
+      `PAYMENT_PROVIDER=disabled`.
 - [ ] Resend secrets, verified sender, Edge Function và cron hoạt động; không còn
       `503`/dead-letter ngoài dự kiến.
 - [ ] `npm run verify` pass trên commit release.
@@ -265,6 +271,8 @@ và liên hệ support; không cố sửa bằng cách reset migration history.
 
 - Nếu webhook mới lỗi, tạm disable endpoint mới, giữ event để Stripe retry sau khi app được
   rollback/fix; không đánh dấu thủ công order paid.
+- Có thể tắt thanh toán mà không rollback app bằng cách đặt `PAYMENT_PROVIDER=disabled` rồi
+  redeploy. Để bật lại, phải cấu hình đủ live key và signing secret trước khi đổi về `stripe`.
 - Nếu email worker lỗi, tắt cron trước, giữ outbox, sửa secrets/function rồi bật lại. Không xóa
   dead-letter trước khi ghi nhận và quyết định retry.
 

@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import { getPaymentProvider } from "@/features/checkout/providers";
+import {
+  getPaymentProvider,
+  isPaymentProviderDisabled,
+  PaymentProviderDisabledError,
+} from "@/features/checkout/providers";
 import { InvalidWebhookSignatureError } from "@/features/checkout/providers/types";
 import { processPaymentEvent } from "@/features/checkout/services";
 import { logServerError } from "@/lib/server-logger";
@@ -12,6 +16,10 @@ const orderIdSchema = z.string().uuid();
 const MAX_WEBHOOK_BYTES = 1024 * 1024;
 
 export async function POST(request: Request) {
+  if (isPaymentProviderDisabled()) {
+    return Response.json({ error: "Stripe provider is disabled" }, { status: 503 });
+  }
+
   const declaredLength = Number(request.headers.get("content-length") ?? 0);
   if (Number.isFinite(declaredLength) && declaredLength > MAX_WEBHOOK_BYTES) {
     return Response.json({ error: "Payload too large" }, { status: 413 });
@@ -46,6 +54,10 @@ export async function POST(request: Request) {
 
     return Response.json({ received: true, result: outcome.result });
   } catch (error) {
+    if (error instanceof PaymentProviderDisabledError) {
+      return Response.json({ error: "Stripe provider is disabled" }, { status: 503 });
+    }
+
     if (error instanceof InvalidWebhookSignatureError) {
       return Response.json({ error: "Invalid signature" }, { status: 400 });
     }

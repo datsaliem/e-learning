@@ -1,5 +1,7 @@
 import "server-only";
 
+export type PaymentProviderMode = "stripe" | "disabled";
+
 function requireServerEnv(names: string[]): string {
   for (const name of names) {
     const value = process.env[name]?.trim();
@@ -11,8 +13,14 @@ function requireServerEnv(names: string[]): string {
 
 /** Never import these getters from Client Components. */
 export const serverEnv = {
-  get paymentProvider() {
-    return (process.env.PAYMENT_PROVIDER?.trim().toLowerCase() || "stripe") as "stripe";
+  get paymentProvider(): PaymentProviderMode {
+    const provider = process.env.PAYMENT_PROVIDER?.trim().toLowerCase() || "stripe";
+
+    if (provider === "stripe" || provider === "disabled") {
+      return provider;
+    }
+
+    throw new Error(`Unsupported payment provider: ${provider}`);
   },
   get stripeSecretKey() {
     return requireServerEnv(["STRIPE_SECRET_KEY"]);

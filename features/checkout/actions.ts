@@ -4,7 +4,11 @@ import { z } from "zod";
 
 import { env } from "@/lib/env";
 import { createClient } from "@/lib/supabase/server";
-import { getPaymentProvider } from "@/features/checkout/providers";
+import {
+  getPaymentProvider,
+  isPaymentProviderDisabled,
+  PaymentProviderDisabledError,
+} from "@/features/checkout/providers";
 import {
   CheckoutDatabaseError,
   createCheckoutOrder,
@@ -31,6 +35,13 @@ function checkoutUrls(orderId: string) {
 }
 
 export async function startCheckout(): Promise<CheckoutActionResult> {
+  if (isPaymentProviderDisabled()) {
+    return {
+      error: "Thanh toán đang tạm đóng. Bạn vẫn có thể duyệt và lưu khóa học.",
+      code: "configuration_error",
+    };
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -141,6 +152,13 @@ export async function startCheckout(): Promise<CheckoutActionResult> {
 
     return { error: "Không thể mở phiên thanh toán mới.", code: "provider_error" };
   } catch (error) {
+    if (error instanceof PaymentProviderDisabledError) {
+      return {
+        error: "Thanh toán đang tạm đóng. Bạn vẫn có thể duyệt và lưu khóa học.",
+        code: "configuration_error",
+      };
+    }
+
     if (isConfigurationError(error)) {
       return {
         error: "Cổng thanh toán chưa được cấu hình trên máy chủ.",

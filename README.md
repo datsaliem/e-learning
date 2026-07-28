@@ -41,12 +41,14 @@ procedure, use [`docs/production-deployment.md`](docs/production-deployment.md).
 ## Stripe Checkout
 
 Checkout is provider-based (`features/checkout/providers`) so another payment gateway can be
-added later without changing the order and enrollment model. Stripe is currently the active
-provider.
+added later without changing the order and enrollment model. Stripe is the supported provider.
+Set `PAYMENT_PROVIDER=disabled` to deploy without Stripe; checkout then shows a clear
+temporary-unavailable message and no Stripe secret is required.
 
-1. Copy the payment variables from `.env.example` to `.env.local` and set:
-   `SUPABASE_SECRET_KEY`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET`. These values are
-   server-only and must never use the `NEXT_PUBLIC_` prefix.
+1. To enable payments, set `PAYMENT_PROVIDER=stripe`, then copy the payment variables from
+   `.env.example` to `.env.local` and set `SUPABASE_SECRET_KEY`, `STRIPE_SECRET_KEY`, and
+   `STRIPE_WEBHOOK_SECRET`. These values are server-only and must never use the `NEXT_PUBLIC_`
+   prefix.
 2. Apply migrations with `supabase db push --linked`.
 3. In Stripe Workbench, register `https://your-domain/api/webhooks/stripe` for:
    `checkout.session.completed`, `checkout.session.async_payment_succeeded`,

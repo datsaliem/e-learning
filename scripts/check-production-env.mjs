@@ -91,8 +91,16 @@ function checkSupabaseServerKey() {
 
 function checkStripe() {
   const provider = value("PAYMENT_PROVIDER") || "stripe";
+  if (provider === "disabled") {
+    addWarning(
+      "PAYMENT_PROVIDER",
+      "payments are intentionally disabled; checkout and Stripe webhooks are unavailable",
+    );
+    return;
+  }
+
   if (provider !== "stripe") {
-    addError("PAYMENT_PROVIDER", "only stripe is supported");
+    addError("PAYMENT_PROVIDER", 'must be either "stripe" or "disabled"');
     return;
   }
 
