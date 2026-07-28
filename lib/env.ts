@@ -7,7 +7,6 @@ function requireEnv(name: string, value: string | undefined): string {
 
 export const env = {
   appUrl: requireEnv("NEXT_PUBLIC_APP_URL", process.env.NEXT_PUBLIC_APP_URL),
-  apiBaseUrl: requireEnv("NEXT_PUBLIC_API_BASE_URL", process.env.NEXT_PUBLIC_API_BASE_URL),
   supabaseUrl: requireEnv("NEXT_PUBLIC_SUPABASE_URL", process.env.NEXT_PUBLIC_SUPABASE_URL),
   supabaseAnonKey: requireEnv(
     "NEXT_PUBLIC_SUPABASE_ANON_KEY",

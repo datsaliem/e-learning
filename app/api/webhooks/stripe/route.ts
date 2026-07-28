@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getPaymentProvider } from "@/features/checkout/providers";
 import { InvalidWebhookSignatureError } from "@/features/checkout/providers/types";
 import { processPaymentEvent } from "@/features/checkout/services";
+import { logServerError } from "@/lib/server-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,10 +50,10 @@ export async function POST(request: Request) {
       return Response.json({ error: "Invalid signature" }, { status: 400 });
     }
 
-    // Do not log the raw body, signature, API keys, or customer data.
-    console.error("Stripe webhook processing error", {
-      message: error instanceof Error ? error.message : "Unknown error",
+    // Do not log the raw body, signature, API keys, metadata or customer data.
+    const errorId = logServerError("stripe_webhook_processing_failed", error, {
+      provider: "stripe",
     });
-    return Response.json({ error: "Webhook processing unavailable" }, { status: 500 });
+    return Response.json({ error: "Webhook processing unavailable", errorId }, { status: 500 });
   }
 }

@@ -181,12 +181,7 @@ function CategoryBranch({
       className={cn("grid gap-3", depth > 0 && "border-border mt-3 ml-5 border-l pl-4 sm:ml-8")}
     >
       {siblings.map((category, index) => (
-        <li
-          key={category.id}
-          role="treeitem"
-          aria-level={depth + 1}
-          aria-selected="false"
-        >
+        <li key={category.id} role="treeitem" aria-level={depth + 1} aria-selected="false">
           <SortableCategoryCard
             category={category}
             index={index}

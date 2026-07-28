@@ -35,6 +35,9 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
+For this project's production variables, Supabase/Stripe checks, go-live checklist, and rollback
+procedure, use [`docs/production-deployment.md`](docs/production-deployment.md).
+
 ## Stripe Checkout
 
 Checkout is provider-based (`features/checkout/providers`) so another payment gateway can be
