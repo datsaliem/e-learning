@@ -1,19 +1,21 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
+import { isUuid } from "@/lib/uuid";
 import { getCurrentUser } from "@/features/auth/queries";
 import { getCourseById } from "@/features/courses/services";
 import type { EnrollmentStatus, MyCourseEnrollment } from "@/features/enrollments/types";
 
 /**
  * Kiểm tra user hiện tại đã ghi danh khoá học chưa — truy vấn thật vào
- * bảng public.enrollments (xem supabase/migrations). Course trong dự án
- * hiện là mock data (id dạng "course-1", không phải uuid), nên khi chưa
- * nối Supabase thật hoặc chưa có khoá học thật trong DB, hàm này sẽ luôn
- * trả về false một cách an toàn thay vì lỗi — không chặn người dùng xem
- * trang.
+ * bảng public.enrollments (xem supabase/migrations). ID minh hoạ không phải
+ * UUID được loại trước khi gửi request để tránh truy vấn PostgREST lỗi 400.
  */
 export async function getEnrollmentStatus(courseId: string): Promise<boolean> {
+  if (!isUuid(courseId)) {
+    return false;
+  }
+
   const user = await getCurrentUser();
   if (!user) {
     return false;
@@ -37,8 +39,7 @@ export async function getEnrollmentStatus(courseId: string): Promise<boolean> {
 /**
  * Danh sách khoá học đã ghi danh của user hiện tại, ghép từ 2 bảng thật
  * (enrollments, lesson_progress) và làm giàu thông tin hiển thị (tiêu đề,
- * giảng viên, tổng số bài học...) từ catalog khoá học (hiện là mock — xem
- * ghi chú ở features/courses/services.ts). Enrollment nào tham chiếu
+ * giảng viên, tổng số bài học...) từ catalog khoá học. Enrollment nào tham chiếu
  * course_id không có trong catalog sẽ bị bỏ qua vì không đủ dữ liệu để
  * hiển thị thẻ khoá học.
  */
@@ -51,16 +52,21 @@ export async function getMyCourses(): Promise<MyCourseEnrollment[]> {
   try {
     const supabase = await createClient();
 
-    const [{ data: enrollments }, { data: progressRows }] = await Promise.all([
-      supabase
-        .from("enrollments")
-        .select("id, course_id, enrolled_at, expires_at")
-        .eq("student_id", user.id),
-      supabase
-        .from("lesson_progress")
-        .select("course_id, lesson_id, completed, updated_at")
-        .eq("student_id", user.id),
-    ]);
+    const [{ data: enrollments }, { data: progressRows }, { data: certificates }] =
+      await Promise.all([
+        supabase
+          .from("enrollments")
+          .select("id, course_id, enrolled_at, expires_at, progress_percent")
+          .eq("student_id", user.id),
+        supabase
+          .from("lesson_progress")
+          .select("course_id, lesson_id, completed, updated_at")
+          .eq("student_id", user.id),
+        supabase
+          .from("certificates")
+          .select("enrollment_id, certificate_code")
+          .eq("student_id", user.id),
+      ]);
 
     if (!enrollments || enrollments.length === 0) {
       return [];
@@ -72,6 +78,13 @@ export async function getMyCourses(): Promise<MyCourseEnrollment[]> {
       list.push(row);
       progressByCourse.set(row.course_id, list);
     }
+
+    const certificateByEnrollment = new Map(
+      (certificates ?? []).map((certificate) => [
+        certificate.enrollment_id,
+        certificate.certificate_code,
+      ]),
+    );
 
     const now = Date.now();
     const results: MyCourseEnrollment[] = [];
@@ -88,8 +101,12 @@ export async function getMyCourses(): Promise<MyCourseEnrollment[]> {
       );
       const rows = progressByCourse.get(enrollment.course_id) ?? [];
       const completedCount = rows.filter((row) => row.completed).length;
-      const progressPercent =
+      const calculatedProgressPercent =
         totalLessons > 0 ? Math.round((completedCount / totalLessons) * 100) : 0;
+      const progressPercent = Math.min(
+        100,
+        Math.max(0, Number(enrollment.progress_percent ?? calculatedProgressPercent)),
+      );
 
       const lastRow = [...rows].sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1))[0];
       const lastLesson = lastRow
@@ -99,11 +116,13 @@ export async function getMyCourses(): Promise<MyCourseEnrollment[]> {
         : undefined;
 
       const isExpired = !!enrollment.expires_at && new Date(enrollment.expires_at).getTime() < now;
-      const status: EnrollmentStatus = isExpired
-        ? "expired"
-        : progressPercent >= 100
+      const certificateCode = certificateByEnrollment.get(enrollment.id) ?? null;
+      const status: EnrollmentStatus =
+        certificateCode || progressPercent >= 100
           ? "completed"
-          : "in_progress";
+          : isExpired
+            ? "expired"
+            : "in_progress";
 
       results.push({
         enrollmentId: enrollment.id,
@@ -120,6 +139,7 @@ export async function getMyCourses(): Promise<MyCourseEnrollment[]> {
         enrolledAt: enrollment.enrolled_at,
         expiresAt: enrollment.expires_at,
         status,
+        certificateCode,
       });
     }
 

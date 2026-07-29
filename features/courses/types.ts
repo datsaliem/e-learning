@@ -27,6 +27,8 @@ export interface Course {
   studentCount: number;
   durationHours: number;
   lessonCount: number;
+  thumbnailUrl?: string | null;
+  language?: string;
   instructor: CourseInstructorSummary;
   isNew: boolean;
   publishedAt: string;

@@ -13,6 +13,12 @@ import {
 import { getFeaturedInstructors } from "@/features/instructors/services";
 import { getTestimonials } from "@/features/testimonials/services";
 
+export const metadata: Metadata = {
+  alternates: {
+    canonical: "/",
+  },
+};
+
 export default async function Home() {
   const [categories, popularCourses, newCourses, instructors, testimonials] = await Promise.all([
     getFeaturedCategories(),
@@ -34,3 +40,4 @@ export default async function Home() {
     </>
   );
 }
+import type { Metadata } from "next";

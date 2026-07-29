@@ -9,6 +9,8 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   Clock3Icon,
+  ExternalLinkIcon,
+  FileWarningIcon,
   Loader2Icon,
   VideoOffIcon,
 } from "lucide-react";
@@ -26,6 +28,13 @@ import {
 } from "@/features/learn/types";
 
 const AUTOSAVE_INTERVAL_MS = 10_000;
+
+const LESSON_TYPE_LABEL = {
+  video: "Video",
+  text: "Bài đọc",
+  pdf: "PDF",
+  external_link: "Liên kết ngoài",
+} as const;
 
 function formatTime(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
@@ -149,9 +158,9 @@ export function LearnPlayer({
     };
   }, [saveProgress]);
 
-  // Bài đọc tính thời gian khi tab đang hiển thị; video lấy currentTime thật.
+  // Nội dung không phải video tính thời gian khi tab đang hiển thị; video lấy currentTime thật.
   React.useEffect(() => {
-    if (lesson.type !== "article" || !isVisible || completed) return;
+    if (lesson.type === "video" || !isVisible || completed) return;
 
     const interval = window.setInterval(() => {
       setWatchedSeconds((current) => {
@@ -229,8 +238,8 @@ export function LearnPlayer({
         </div>
         <p className="text-muted-foreground flex items-center gap-2 text-sm">
           <Clock3Icon className="size-4" aria-hidden="true" />
-          {lesson.type === "video" ? "Video" : "Bài đọc"} · khoảng{" "}
-          {Math.max(1, Math.ceil(durationSeconds / 60))} phút
+          {LESSON_TYPE_LABEL[lesson.type]} · khoảng {Math.max(1, Math.ceil(durationSeconds / 60))}{" "}
+          phút
           {isSaving && (
             <span className="ml-auto flex items-center gap-1" role="status">
               <Loader2Icon className="size-3.5 animate-spin" aria-hidden="true" />
@@ -269,10 +278,50 @@ export function LearnPlayer({
             </AlertDescription>
           </Alert>
         )
-      ) : (
+      ) : lesson.type === "text" ? (
         <article className="bg-card ring-foreground/10 rounded-xl px-5 py-6 leading-7 whitespace-pre-wrap ring-1 sm:px-8 sm:py-8">
           {lesson.content || "Nội dung bài học đang được giảng viên cập nhật."}
         </article>
+      ) : lesson.type === "pdf" ? (
+        lesson.documentUrl ? (
+          <div className="bg-card ring-foreground/10 overflow-hidden rounded-xl ring-1">
+            <iframe
+              src={lesson.documentUrl}
+              title={`Tài liệu PDF: ${lesson.title}`}
+              className="h-[70dvh] min-h-[32rem] w-full"
+            />
+          </div>
+        ) : (
+          <Alert>
+            <FileWarningIcon aria-hidden="true" />
+            <AlertTitle>Chưa thể tải PDF</AlertTitle>
+            <AlertDescription>
+              Tài liệu có thể đang được cập nhật. Hãy tải lại trang sau ít phút.
+            </AlertDescription>
+          </Alert>
+        )
+      ) : (
+        <div className="bg-card ring-foreground/10 flex flex-col items-start rounded-xl p-6 ring-1 sm:p-8">
+          <span className="bg-primary/10 text-primary flex size-11 items-center justify-center rounded-xl">
+            <ExternalLinkIcon aria-hidden="true" />
+          </span>
+          <h2 className="mt-4 text-lg font-semibold">Nội dung trên trang bên ngoài</h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            Liên kết sẽ mở trong tab mới. Quay lại đây để tiếp tục theo dõi tiến độ.
+          </p>
+          {lesson.externalUrl ? (
+            <Button
+              className="mt-5"
+              nativeButton={false}
+              render={<a href={lesson.externalUrl} target="_blank" rel="noreferrer noopener" />}
+            >
+              Mở nội dung
+              <ExternalLinkIcon aria-hidden="true" />
+            </Button>
+          ) : (
+            <p className="text-destructive mt-4 text-sm">Liên kết chưa được giảng viên cập nhật.</p>
+          )}
+        </div>
       )}
 
       <section className="flex flex-col gap-2" aria-labelledby="lesson-progress-heading">

@@ -53,14 +53,16 @@ export async function getLearningPageData(
   const [{ data: sectionRows }, { data: lessonRows, error: lessonsError }] = await Promise.all([
     supabase
       .from("course_sections")
-      .select("id, title, position")
+      .select("id, title, sort_order")
       .eq("course_id", course.id)
-      .order("position", { ascending: true }),
+      .order("sort_order", { ascending: true }),
     supabase
       .from("lessons")
-      .select("id, section_id, title, content, lesson_type, video_path, duration_seconds, position")
+      .select(
+        "id, section_id, title, content, lesson_type, video_path, content_path, external_url, duration_seconds, sort_order",
+      )
       .eq("course_id", course.id)
-      .order("position", { ascending: true }),
+      .order("sort_order", { ascending: true }),
   ]);
 
   if (lessonsError || !lessonRows) {
@@ -111,9 +113,10 @@ export async function getLearningPageData(
       .eq("course_id", course.id),
     supabase
       .from("lesson_resources")
-      .select("id, name, storage_path, file_size_bytes, mime_type, position")
+      .select("id, name, storage_path, file_size_bytes, mime_type, sort_order")
       .eq("lesson_id", lessonId)
-      .order("position", { ascending: true }),
+      .eq("upload_status", "ready")
+      .order("sort_order", { ascending: true }),
   ]);
 
   const progressMap: Record<string, LessonProgressEntry> = {};
@@ -131,6 +134,14 @@ export async function getLearningPageData(
       .from("course-content")
       .createSignedUrl(currentRow.video_path, 60 * 60);
     videoUrl = data?.signedUrl ?? null;
+  }
+
+  let documentUrl: string | null = null;
+  if (currentRow.lesson_type === "pdf" && currentRow.content_path) {
+    const { data } = await supabase.storage
+      .from("course-content")
+      .createSignedUrl(currentRow.content_path, 60 * 60);
+    documentUrl = data?.signedUrl ?? null;
   }
 
   const resources = (
@@ -172,6 +183,8 @@ export async function getLearningPageData(
         type: currentRow.lesson_type,
         content: currentRow.content,
         videoUrl,
+        documentUrl,
+        externalUrl: currentRow.external_url,
         durationSeconds: currentRow.duration_seconds,
         resources,
       },

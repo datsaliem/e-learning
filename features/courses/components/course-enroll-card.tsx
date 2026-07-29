@@ -11,7 +11,9 @@ import { Separator } from "@/components/ui/separator";
 import { formatCurrencyVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { safeAction } from "@/lib/safe-action";
+import { isUuid } from "@/lib/uuid";
 import { enrollInCourse } from "@/features/enrollments/actions";
+import { AddToCartButton } from "@/features/cart/components/add-to-cart-button";
 import { CATEGORY_GRADIENT, LEVEL_LABEL } from "@/features/courses/constants";
 import type { CourseDetail } from "@/features/courses/types";
 
@@ -26,6 +28,7 @@ export function CourseEnrollCard({
 }) {
   const [enrolled, setEnrolled] = React.useState(isEnrolled);
   const [isPending, startTransition] = React.useTransition();
+  const isAvailable = isUuid(course.id);
 
   const totalLessons = course.curriculum.reduce((sum, section) => sum + section.lessons.length, 0);
 
@@ -71,14 +74,25 @@ export function CourseEnrollCard({
           )}
         </div>
 
-        {enrolled ? (
+        {!isAvailable ? (
+          <>
+            <Button size="lg" disabled>
+              Khoá học minh hoạ
+            </Button>
+            <p className="text-muted-foreground text-center text-xs">
+              Chỉ khoá học đã xuất bản từ Course Builder mới có thể ghi danh hoặc thanh toán.
+            </p>
+          </>
+        ) : enrolled ? (
           <Button size="lg" nativeButton={false} render={<Link href="/dashboard" />}>
             Tiếp tục học
           </Button>
+        ) : course.price > 0 ? (
+          <AddToCartButton course={course} />
         ) : isAuthenticated ? (
           <Button size="lg" disabled={isPending} onClick={handleEnroll}>
             {isPending && <Loader2Icon className="animate-spin" />}
-            {course.price === 0 ? "Ghi danh miễn phí" : "Mua khoá học"}
+            Ghi danh miễn phí
           </Button>
         ) : (
           <Button size="lg" nativeButton={false} render={<Link href="/login" />}>

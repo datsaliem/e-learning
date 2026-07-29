@@ -73,6 +73,7 @@ export const footerLinkGroups: NavLinkGroup[] = [
     title: "Hỗ trợ",
     links: [
       { label: "Trung tâm trợ giúp", href: "/help" },
+      { label: "Xác minh chứng chỉ", href: "/certificates/verify" },
       { label: "Liên hệ", href: "/contact" },
       { label: "Câu hỏi thường gặp", href: "/faq" },
     ],

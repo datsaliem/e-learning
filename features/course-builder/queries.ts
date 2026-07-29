@@ -2,6 +2,11 @@ import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
 import type { OwnedCourseDraft } from "@/features/course-builder/types";
+import type {
+  CourseStatusAction,
+  CourseStatusHistoryItem,
+  CourseWorkflowStatus,
+} from "@/types/course";
 
 export async function getOwnedCourseDraft(
   courseId: string,
@@ -11,7 +16,7 @@ export async function getOwnedCourseDraft(
   const { data, error } = await supabase
     .from("courses")
     .select(
-      "id, title, slug, short_description, description, category, level, language, thumbnail_url, trailer_url, price, sale_price, status, submitted_at",
+      "id, title, slug, short_description, description, category, level, language, thumbnail_url, trailer_url, price, sale_price, status, submitted_at, published_at, latest_review_feedback, latest_reviewed_at",
     )
     .eq("id", courseId)
     .eq("instructor_id", instructorId)
@@ -20,6 +25,22 @@ export async function getOwnedCourseDraft(
   if (error || !data) {
     return null;
   }
+
+  const { data: historyRows } = await supabase
+    .from("course_status_history")
+    .select("id, from_status, to_status, action, reason, changed_by_role, created_at")
+    .eq("course_id", courseId)
+    .order("created_at", { ascending: false });
+
+  const reviewHistory: CourseStatusHistoryItem[] = (historyRows ?? []).map((history) => ({
+    id: history.id,
+    fromStatus: history.from_status as CourseWorkflowStatus | null,
+    toStatus: history.to_status as CourseWorkflowStatus,
+    action: history.action as CourseStatusAction,
+    reason: history.reason,
+    changedByRole: history.changed_by_role as CourseStatusHistoryItem["changedByRole"],
+    createdAt: history.created_at,
+  }));
 
   return {
     id: data.id,
@@ -36,5 +57,9 @@ export async function getOwnedCourseDraft(
     salePrice: data.sale_price === null ? undefined : Number(data.sale_price),
     status: data.status,
     submittedAt: data.submitted_at,
+    publishedAt: data.published_at,
+    latestReviewFeedback: data.latest_review_feedback,
+    latestReviewedAt: data.latest_reviewed_at,
+    reviewHistory,
   } as OwnedCourseDraft;
 }

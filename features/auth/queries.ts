@@ -1,9 +1,9 @@
 import "server-only";
 
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 
-import { createClient } from "@/lib/supabase/server";
 import type { UserRole } from "@/features/auth/types";
+import { isSupabaseConfigured } from "@/lib/env";
 
 export interface CurrentUser {
   id: string;
@@ -14,27 +14,40 @@ export interface CurrentUser {
 
 /** Trả về user đang đăng nhập kèm role, hoặc null nếu chưa đăng nhập. */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  if (!isSupabaseConfigured) {
     return null;
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, role")
-    .eq("id", user.id)
-    .single();
+  try {
+    const { createClient } = await import("@/lib/supabase/server");
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
 
-  return {
-    id: user.id,
-    email: user.email ?? "",
-    fullName: profile?.full_name ?? null,
-    role: (profile?.role as UserRole | undefined) ?? "student",
-  };
+    if (error || !user) {
+      return null;
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("full_name, role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    return {
+      id: user.id,
+      email: user.email ?? "",
+      fullName: profile?.full_name ?? null,
+      role: (profile?.role as UserRole | undefined) ?? "student",
+    };
+  } catch (error) {
+    // Không nuốt lỗi nội bộ mà Next.js dùng để chuyển route sang dynamic rendering.
+    // Nếu bị catch, các trang theo session sẽ bị prerender thành redirect /login vĩnh viễn.
+    unstable_rethrow(error);
+    return null;
+  }
 }
 
 /** Đường dẫn dashboard tương ứng với từng role — dùng để redirect sau khi đăng nhập. */

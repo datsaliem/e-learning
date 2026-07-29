@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   ArrowLeftIcon,
   EyeIcon,
+  LockKeyholeIcon,
   Loader2Icon,
   OctagonXIcon,
   SaveIcon,
@@ -44,8 +45,8 @@ import {
 } from "@/features/course-builder/actions";
 import { CourseMediaField } from "@/features/course-builder/components/course-media-field";
 import { CoursePreviewDialog } from "@/features/course-builder/components/course-preview-dialog";
+import { CourseReviewPanel } from "@/features/course-builder/components/course-review-panel";
 import {
-  COURSE_CATEGORY_OPTIONS,
   COURSE_LANGUAGE_OPTIONS,
   COURSE_LEVEL_OPTIONS,
   type CourseMediaKind,
@@ -58,9 +59,12 @@ import {
   type CourseBuilderInput,
 } from "@/features/course-builder/schemas";
 import type { CourseWorkflowStatus, OwnedCourseDraft } from "@/features/course-builder/types";
+import type { CourseCategoryOption } from "@/features/categories/types";
+import { isEditableCourseStatus } from "@/types/course";
 
 interface CourseBuilderFormProps {
   instructorName: string;
+  categoryOptions: CourseCategoryOption[];
   initialCourse?: OwnedCourseDraft;
 }
 
@@ -68,11 +72,16 @@ type SubmitIntent = "draft" | "review";
 
 const STATUS_CONFIG: Record<
   CourseWorkflowStatus,
-  { label: string; variant: "outline" | "warning" | "success" | "secondary" }
+  {
+    label: string;
+    variant: "outline" | "warning" | "success" | "destructive" | "secondary";
+  }
 > = {
   draft: { label: "Bản nháp", variant: "outline" },
   pending_review: { label: "Chờ duyệt", variant: "warning" },
+  changes_requested: { label: "Cần chỉnh sửa", variant: "warning" },
   published: { label: "Đã xuất bản", variant: "success" },
+  rejected: { label: "Bị từ chối", variant: "destructive" },
   archived: { label: "Đã lưu trữ", variant: "secondary" },
 };
 
@@ -81,7 +90,7 @@ const EMPTY_COURSE: CourseBuilderInput = {
   slug: "",
   shortDescription: "",
   fullDescription: "",
-  category: "lap-trinh",
+  category: "",
   level: "beginner",
   language: "Tiếng Việt",
   thumbnailUrl: "",
@@ -90,7 +99,11 @@ const EMPTY_COURSE: CourseBuilderInput = {
   salePrice: undefined,
 };
 
-export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuilderFormProps) {
+export function CourseBuilderForm({
+  instructorName,
+  categoryOptions,
+  initialCourse,
+}: CourseBuilderFormProps) {
   const router = useRouter();
   const [courseId, setCourseId] = React.useState(initialCourse?.id ?? null);
   const [status, setStatus] = React.useState<CourseWorkflowStatus>(
@@ -124,12 +137,20 @@ export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuild
           price: initialCourse.price,
           salePrice: initialCourse.salePrice,
         }
-      : EMPTY_COURSE,
+      : {
+          ...EMPTY_COURSE,
+          category: categoryOptions[0]?.value ?? "",
+        },
   });
 
   const title = form.watch("title");
   const previewCourse = form.watch();
   const isBusy = pendingIntent !== null;
+  const canEdit = isEditableCourseStatus(status);
+
+  React.useEffect(() => {
+    if (initialCourse) setStatus(initialCourse.status);
+  }, [initialCourse]);
 
   React.useEffect(() => {
     if (!slugWasEdited.current) {
@@ -199,7 +220,7 @@ export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuild
       const activeCourseId = saveResult.data.courseId;
       savedCourseId = activeCourseId;
       setCourseId(activeCourseId);
-      setStatus("draft");
+      setStatus(saveResult.data.status);
 
       let thumbnailUrl = values.thumbnailUrl;
       let trailerUrl = values.trailerUrl;
@@ -225,7 +246,7 @@ export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuild
         if ("error" in mediaResult) throw new Error(mediaResult.error);
       }
 
-      let nextStatus: CourseWorkflowStatus = "draft";
+      let nextStatus: CourseWorkflowStatus = saveResult.data.status;
       if (intent === "review") {
         setProgressLabel("Đang gửi khoá học để duyệt...");
         const reviewResult = await safeAction(() => submitCourseForReview(activeCourseId));
@@ -240,7 +261,11 @@ export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuild
       setStatus(nextStatus);
 
       toast.success(
-        intent === "review" ? "Khoá học đã được gửi để duyệt." : "Đã lưu bản nháp khoá học.",
+        intent === "review"
+          ? "Khoá học đã được gửi để duyệt."
+          : saveResult.data.status === "draft"
+            ? "Đã lưu bản nháp khoá học."
+            : "Đã lưu các chỉnh sửa.",
       );
 
       if (!courseId) {
@@ -300,6 +325,18 @@ export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuild
         </Button>
       </div>
 
+      {initialCourse && <CourseReviewPanel course={initialCourse} />}
+
+      {!canEdit && (
+        <Alert>
+          <LockKeyholeIcon aria-hidden="true" />
+          <AlertDescription>
+            Khóa học đang ở trạng thái “{statusConfig.label}”. Thông tin và curriculum hiện chỉ có
+            thể xem để đảm bảo nội dung đã gửi duyệt không thay đổi.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Form {...form}>
         <form
           noValidate
@@ -309,339 +346,341 @@ export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuild
           )}
           className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]"
         >
-          <div className="flex min-w-0 flex-col gap-6">
-            {formError && (
-              <Alert variant="destructive">
-                <OctagonXIcon aria-hidden="true" />
-                <AlertDescription>{formError}</AlertDescription>
-              </Alert>
-            )}
+          <fieldset className="contents" disabled={!canEdit || isBusy}>
+            <div className="flex min-w-0 flex-col gap-6">
+              {formError && (
+                <Alert variant="destructive">
+                  <OctagonXIcon aria-hidden="true" />
+                  <AlertDescription>{formError}</AlertDescription>
+                </Alert>
+              )}
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Thông tin cơ bản</CardTitle>
-                <CardDescription>
-                  Giúp học viên hiểu nhanh nội dung và đối tượng của khoá học.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-5">
-                <FormField
-                  control={form.control}
-                  name="title"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tiêu đề</FormLabel>
-                      <FormControl>
-                        <Input placeholder="Ví dụ: Next.js từ cơ bản đến thực chiến" {...field} />
-                      </FormControl>
-                      <FormDescription>Tối đa 120 ký tự.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="slug"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Slug</FormLabel>
-                      <div className="flex gap-2">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Thông tin cơ bản</CardTitle>
+                  <CardDescription>
+                    Giúp học viên hiểu nhanh nội dung và đối tượng của khoá học.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-5">
+                  <FormField
+                    control={form.control}
+                    name="title"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Tiêu đề</FormLabel>
                         <FormControl>
-                          <Input
-                            autoCapitalize="none"
-                            spellCheck={false}
-                            placeholder="nextjs-tu-co-ban-den-thuc-chien"
-                            {...field}
-                            onChange={(event) => {
-                              slugWasEdited.current = true;
-                              field.onChange(event);
+                          <Input placeholder="Ví dụ: Next.js từ cơ bản đến thực chiến" {...field} />
+                        </FormControl>
+                        <FormDescription>Tối đa 120 ký tự.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="slug"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Slug</FormLabel>
+                        <div className="flex gap-2">
+                          <FormControl>
+                            <Input
+                              autoCapitalize="none"
+                              spellCheck={false}
+                              placeholder="nextjs-tu-co-ban-den-thuc-chien"
+                              {...field}
+                              onChange={(event) => {
+                                slugWasEdited.current = true;
+                                field.onChange(event);
+                              }}
+                            />
+                          </FormControl>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => {
+                              slugWasEdited.current = false;
+                              form.setValue("slug", slugifyCourseTitle(form.getValues("title")), {
+                                shouldDirty: true,
+                                shouldValidate: true,
+                              });
                             }}
+                          >
+                            Tạo lại
+                          </Button>
+                        </div>
+                        <FormDescription>Dùng trong URL công khai của khoá học.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="shortDescription"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Mô tả ngắn</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Tóm tắt giá trị nổi bật của khoá học..."
+                            className="min-h-24"
+                            {...field}
                           />
                         </FormControl>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => {
-                            slugWasEdited.current = false;
-                            form.setValue("slug", slugifyCourseTitle(form.getValues("title")), {
-                              shouldDirty: true,
-                              shouldValidate: true,
-                            });
-                          }}
-                        >
-                          Tạo lại
-                        </Button>
-                      </div>
-                      <FormDescription>Dùng trong URL công khai của khoá học.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="shortDescription"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Mô tả ngắn</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          placeholder="Tóm tắt giá trị nổi bật của khoá học..."
-                          className="min-h-24"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormDescription>{field.value.length}/220 ký tự.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <div className="grid gap-5 sm:grid-cols-3">
-                  <FormField
-                    control={form.control}
-                    name="category"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Danh mục</FormLabel>
-                        <Select
-                          value={field.value}
-                          onValueChange={(value) => value && field.onChange(value)}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {COURSE_CATEGORY_OPTIONS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <FormDescription>{field.value.length}/220 ký tự.</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
 
+                  <div className="grid gap-5 sm:grid-cols-3">
+                    <FormField
+                      control={form.control}
+                      name="category"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Danh mục</FormLabel>
+                          <Select
+                            value={field.value}
+                            onValueChange={(value) => value && field.onChange(value)}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {categoryOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="level"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Cấp độ</FormLabel>
+                          <Select
+                            value={field.value}
+                            onValueChange={(value) => value && field.onChange(value)}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {COURSE_LEVEL_OPTIONS.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="language"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Ngôn ngữ</FormLabel>
+                          <Select
+                            value={field.value}
+                            onValueChange={(value) => value && field.onChange(value)}
+                          >
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {COURSE_LANGUAGE_OPTIONS.map((language) => (
+                                <SelectItem key={language} value={language}>
+                                  {language}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Nội dung giới thiệu</CardTitle>
+                  <CardDescription>
+                    Trình bày kết quả học tập, chủ đề chính và những gì học viên nhận được.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
                   <FormField
                     control={form.control}
-                    name="level"
+                    name="fullDescription"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Cấp độ</FormLabel>
-                        <Select
-                          value={field.value}
-                          onValueChange={(value) => value && field.onChange(value)}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {COURSE_LEVEL_OPTIONS.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <FormLabel>Mô tả đầy đủ</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Viết mô tả chi tiết về khoá học..."
+                            className="min-h-72 resize-y"
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>Từ 100 đến 10.000 ký tự.</FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+                </CardContent>
+              </Card>
+            </div>
 
-                  <FormField
-                    control={form.control}
-                    name="language"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Ngôn ngữ</FormLabel>
-                        <Select
-                          value={field.value}
-                          onValueChange={(value) => value && field.onChange(value)}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="w-full">
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {COURSE_LANGUAGE_OPTIONS.map((language) => (
-                              <SelectItem key={language} value={language}>
-                                {language}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Nội dung giới thiệu</CardTitle>
-                <CardDescription>
-                  Trình bày kết quả học tập, chủ đề chính và những gì học viên nhận được.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <FormField
-                  control={form.control}
-                  name="fullDescription"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Mô tả đầy đủ</FormLabel>
-                      <FormControl>
-                        <Textarea
-                          placeholder="Viết mô tả chi tiết về khoá học..."
-                          className="min-h-72 resize-y"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormDescription>Từ 100 đến 10.000 ký tự.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </CardContent>
-            </Card>
-          </div>
-
-          <aside className="flex flex-col gap-6 lg:sticky lg:top-24">
-            <Card>
-              <CardHeader>
-                <CardTitle>Media</CardTitle>
-                <CardDescription>Thumbnail là bắt buộc trước khi gửi duyệt.</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-5">
-                <CourseMediaField
-                  kind="thumbnail"
-                  file={thumbnailFile}
-                  previewUrl={thumbnailPreview}
-                  disabled={isBusy}
-                  onSelect={(file) => selectMedia("thumbnail", file)}
-                />
-                <CourseMediaField
-                  kind="trailer"
-                  file={trailerFile}
-                  previewUrl={trailerPreview}
-                  disabled={isBusy}
-                  onSelect={(file) => selectMedia("trailer", file)}
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Giá và xuất bản</CardTitle>
-                <CardDescription>Giá được nhập theo Việt Nam đồng.</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-5">
-                <FormField
-                  control={form.control}
-                  name="price"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Giá gốc</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          inputMode="numeric"
-                          min={0}
-                          step={1000}
-                          value={field.value}
-                          onBlur={field.onBlur}
-                          onChange={(event) =>
-                            field.onChange(
-                              event.target.value === "" ? 0 : Number(event.target.value),
-                            )
-                          }
-                          name={field.name}
-                          ref={field.ref}
-                        />
-                      </FormControl>
-                      <FormDescription>Nhập 0 cho khoá học miễn phí.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="salePrice"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Giá khuyến mãi</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="number"
-                          inputMode="numeric"
-                          min={0}
-                          step={1000}
-                          placeholder="Không áp dụng"
-                          value={field.value ?? ""}
-                          onBlur={field.onBlur}
-                          onChange={(event) =>
-                            field.onChange(
-                              event.target.value === "" ? undefined : Number(event.target.value),
-                            )
-                          }
-                          name={field.name}
-                          ref={field.ref}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {progressLabel && (
-                  <p
-                    className="text-muted-foreground flex items-center gap-2 text-sm"
-                    role="status"
-                  >
-                    <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-                    {progressLabel}
-                  </p>
-                )}
-
-                <div className="grid gap-2">
-                  <Button type="submit" variant="outline" disabled={isBusy}>
-                    {pendingIntent === "draft" ? (
-                      <Loader2Icon className="animate-spin" aria-hidden="true" />
-                    ) : (
-                      <SaveIcon aria-hidden="true" />
-                    )}
-                    Lưu bản nháp
-                  </Button>
-                  <Button
-                    type="button"
+            <aside className="flex flex-col gap-6 lg:sticky lg:top-24">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Media</CardTitle>
+                  <CardDescription>Thumbnail là bắt buộc trước khi gửi duyệt.</CardDescription>
+                </CardHeader>
+                <CardContent className="flex flex-col gap-5">
+                  <CourseMediaField
+                    kind="thumbnail"
+                    file={thumbnailFile}
+                    previewUrl={thumbnailPreview}
                     disabled={isBusy}
-                    onClick={form.handleSubmit(
-                      (values) => void persistCourse(values, "review"),
-                      handleInvalid,
+                    onSelect={(file) => selectMedia("thumbnail", file)}
+                  />
+                  <CourseMediaField
+                    kind="trailer"
+                    file={trailerFile}
+                    previewUrl={trailerPreview}
+                    disabled={isBusy}
+                    onSelect={(file) => selectMedia("trailer", file)}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Giá và xuất bản</CardTitle>
+                  <CardDescription>Giá được nhập theo Việt Nam đồng.</CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-5">
+                  <FormField
+                    control={form.control}
+                    name="price"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Giá gốc</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            step={1000}
+                            value={field.value}
+                            onBlur={field.onBlur}
+                            onChange={(event) =>
+                              field.onChange(
+                                event.target.value === "" ? 0 : Number(event.target.value),
+                              )
+                            }
+                            name={field.name}
+                            ref={field.ref}
+                          />
+                        </FormControl>
+                        <FormDescription>Nhập 0 cho khoá học miễn phí.</FormDescription>
+                        <FormMessage />
+                      </FormItem>
                     )}
-                  >
-                    {pendingIntent === "review" ? (
-                      <Loader2Icon className="animate-spin" aria-hidden="true" />
-                    ) : (
-                      <SendIcon aria-hidden="true" />
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="salePrice"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Giá khuyến mãi</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            step={1000}
+                            placeholder="Không áp dụng"
+                            value={field.value ?? ""}
+                            onBlur={field.onBlur}
+                            onChange={(event) =>
+                              field.onChange(
+                                event.target.value === "" ? undefined : Number(event.target.value),
+                              )
+                            }
+                            name={field.name}
+                            ref={field.ref}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
                     )}
-                    Gửi duyệt
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </aside>
+                  />
+
+                  {progressLabel && (
+                    <p
+                      className="text-muted-foreground flex items-center gap-2 text-sm"
+                      role="status"
+                    >
+                      <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
+                      {progressLabel}
+                    </p>
+                  )}
+
+                  <div className="grid gap-2">
+                    <Button type="submit" variant="outline" disabled={isBusy || !canEdit}>
+                      {pendingIntent === "draft" ? (
+                        <Loader2Icon className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <SaveIcon aria-hidden="true" />
+                      )}
+                      {status === "draft" ? "Lưu bản nháp" : "Lưu chỉnh sửa"}
+                    </Button>
+                    <Button
+                      type="button"
+                      disabled={isBusy || !canEdit}
+                      onClick={form.handleSubmit(
+                        (values) => void persistCourse(values, "review"),
+                        handleInvalid,
+                      )}
+                    >
+                      {pendingIntent === "review" ? (
+                        <Loader2Icon className="animate-spin" aria-hidden="true" />
+                      ) : (
+                        <SendIcon aria-hidden="true" />
+                      )}
+                      Gửi duyệt
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </aside>
+          </fieldset>
         </form>
       </Form>
 
@@ -652,6 +691,7 @@ export function CourseBuilderForm({ instructorName, initialCourse }: CourseBuild
         thumbnailUrl={thumbnailPreview}
         trailerUrl={trailerPreview}
         instructorName={instructorName}
+        categoryOptions={categoryOptions}
       />
     </div>
   );

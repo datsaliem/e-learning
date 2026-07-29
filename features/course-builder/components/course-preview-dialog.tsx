@@ -8,8 +8,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { COURSE_CATEGORY_OPTIONS, COURSE_LEVEL_OPTIONS } from "@/features/course-builder/constants";
+import { COURSE_LEVEL_OPTIONS } from "@/features/course-builder/constants";
 import type { CourseBuilderInput } from "@/features/course-builder/schemas";
+import type { CourseCategoryOption } from "@/features/categories/types";
 
 interface CoursePreviewDialogProps {
   open: boolean;
@@ -18,6 +19,7 @@ interface CoursePreviewDialogProps {
   thumbnailUrl: string;
   trailerUrl: string;
   instructorName: string;
+  categoryOptions: CourseCategoryOption[];
 }
 
 const currencyFormatter = new Intl.NumberFormat("vi-VN", {
@@ -33,10 +35,9 @@ export function CoursePreviewDialog({
   thumbnailUrl,
   trailerUrl,
   instructorName,
+  categoryOptions,
 }: CoursePreviewDialogProps) {
-  const category = COURSE_CATEGORY_OPTIONS.find(
-    (option) => option.value === course.category,
-  )?.label;
+  const category = categoryOptions.find((option) => option.value === course.category)?.name;
   const level = COURSE_LEVEL_OPTIONS.find((option) => option.value === course.level)?.label;
   const effectivePrice = course.salePrice ?? course.price;
 

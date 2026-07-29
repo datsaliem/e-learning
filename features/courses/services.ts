@@ -1,15 +1,14 @@
 import "server-only";
 
 import { courseCategories } from "@/lib/nav-config";
+import { createClient } from "@/lib/supabase/server";
+import { isUuid } from "@/lib/uuid";
 import { COURSE_DETAILS, COURSE_REVIEWS } from "@/features/courses/course-details-data";
 import type { Course, CourseCategory, CourseDetail, CourseReview } from "@/features/courses/types";
 import { getInstructorById } from "@/features/instructors/services";
+import type { Instructor } from "@/features/instructors/types";
 
-/**
- * Mock data — chỗ duy nhất cần thay khi nối Supabase thật: giữ nguyên chữ
- * ký (signature) async của các hàm bên dưới, đổi phần thân sang truy vấn
- * `supabase.from("courses")...`, phía gọi (component) không cần đổi gì.
- */
+/** Dữ liệu minh hoạ được giữ làm fallback khi catalog thật chưa có nội dung. */
 const MOCK_COURSES: Course[] = [
   {
     id: "course-1",
@@ -213,15 +212,234 @@ const CATEGORY_COURSE_COUNTS: Record<string, number> = {
   "ky-nang-mem": 28,
 };
 
+interface PublishedCourseRow {
+  course_id: string;
+  slug: string;
+  title: string;
+  short_description: string;
+  full_description: string;
+  category: string;
+  level: Course["level"];
+  language: string;
+  thumbnail_url: string | null;
+  trailer_url: string | null;
+  price: number | string;
+  sale_price: number | string | null;
+  published_at: string;
+  instructor_id: string;
+  instructor_name: string;
+  instructor_avatar_url: string | null;
+  instructor_headline: string;
+  instructor_bio: string;
+  student_count: number | string;
+  lesson_count: number | string;
+  duration_seconds: number | string;
+  review_count: number | string;
+  rating: number | string;
+}
+
+interface PublishedCurriculumRow {
+  section_id: string;
+  section_title: string;
+  section_sort_order: number;
+  lesson_id: string | null;
+  lesson_title: string | null;
+  lesson_duration_seconds: number | null;
+  lesson_is_preview: boolean | null;
+  lesson_sort_order: number | null;
+}
+
+function getCategoryLabel(slug: string): string {
+  return (
+    courseCategories.find((category) => category.href.endsWith(`category=${slug}`))?.label ??
+    "Khoá học"
+  );
+}
+
+function toSafeNumber(value: number | string | null, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function mapPublishedCourse(row: PublishedCourseRow): Course {
+  const listPrice = toSafeNumber(row.price);
+  const salePrice = row.sale_price === null ? null : toSafeNumber(row.sale_price);
+  const publishedAt = row.published_at;
+  const publishedTime = new Date(publishedAt).getTime();
+  const isNew =
+    Number.isFinite(publishedTime) && Date.now() - publishedTime <= 30 * 24 * 60 * 60 * 1000;
+
+  return {
+    id: row.course_id,
+    slug: row.slug,
+    title: row.title,
+    description: row.short_description || row.full_description,
+    categorySlug: row.category,
+    categoryLabel: getCategoryLabel(row.category),
+    level: row.level,
+    price: salePrice ?? listPrice,
+    ...(salePrice === null ? {} : { originalPrice: listPrice }),
+    rating: toSafeNumber(row.rating),
+    reviewCount: Math.trunc(toSafeNumber(row.review_count)),
+    studentCount: Math.trunc(toSafeNumber(row.student_count)),
+    durationHours: Math.round((toSafeNumber(row.duration_seconds) / 3600) * 10) / 10,
+    lessonCount: Math.trunc(toSafeNumber(row.lesson_count)),
+    thumbnailUrl: row.thumbnail_url,
+    language: row.language,
+    instructor: {
+      id: row.instructor_id,
+      name: row.instructor_name,
+      avatarUrl: row.instructor_avatar_url,
+    },
+    isNew,
+    publishedAt,
+  };
+}
+
+function mapPublishedInstructor(row: PublishedCourseRow): Instructor {
+  return {
+    id: row.instructor_id,
+    name: row.instructor_name,
+    avatarUrl: row.instructor_avatar_url,
+    headline: row.instructor_headline || "Giảng viên E-Learning",
+    bio: row.instructor_bio,
+    studentCount: Math.trunc(toSafeNumber(row.student_count)),
+    courseCount: 1,
+    rating: toSafeNumber(row.rating),
+  };
+}
+
+async function getPublishedRows(input?: {
+  slug?: string;
+  courseId?: string;
+  limit?: number;
+}): Promise<PublishedCourseRow[]> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("get_published_course_catalog", {
+      p_slug: input?.slug ?? null,
+      p_course_id: input?.courseId ?? null,
+      p_limit: input?.limit ?? 50,
+    });
+
+    if (error || !data) return [];
+    return data as unknown as PublishedCourseRow[];
+  } catch {
+    return [];
+  }
+}
+
+async function getPublishedCurriculum(courseId: string): Promise<CourseDetail["curriculum"]> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("get_published_course_curriculum", {
+      p_course_id: courseId,
+    });
+    if (error || !data) return [];
+
+    const sections = new Map<string, CourseDetail["curriculum"][number]>();
+    for (const row of data as unknown as PublishedCurriculumRow[]) {
+      const section = sections.get(row.section_id) ?? {
+        id: row.section_id,
+        title: row.section_title,
+        lessons: [],
+      };
+
+      if (row.lesson_id && row.lesson_title) {
+        section.lessons.push({
+          id: row.lesson_id,
+          title: row.lesson_title,
+          durationMinutes: Math.max(1, Math.ceil(toSafeNumber(row.lesson_duration_seconds) / 60)),
+          isPreview: row.lesson_is_preview ?? false,
+        });
+      }
+
+      sections.set(row.section_id, section);
+    }
+
+    return [...sections.values()];
+  } catch {
+    return [];
+  }
+}
+
+async function buildPublishedCourseDetail(
+  row: PublishedCourseRow | undefined,
+): Promise<CourseDetail | null> {
+  if (!row) return null;
+
+  return {
+    ...mapPublishedCourse(row),
+    longDescription: row.full_description || row.short_description,
+    objectives: [],
+    requirements: [],
+    curriculum: await getPublishedCurriculum(row.course_id),
+    instructorDetail: mapPublishedInstructor(row),
+  };
+}
+
 export async function getPopularCourses(limit = 8): Promise<Course[]> {
-  return [...MOCK_COURSES].sort((a, b) => b.studentCount - a.studentCount).slice(0, limit);
+  const databaseCourses = (await getPublishedRows({ limit: 100 })).sort(
+    (a, b) => toSafeNumber(b.student_count) - toSafeNumber(a.student_count),
+  );
+  const databaseMapped = databaseCourses.map(mapPublishedCourse);
+  const fallback = [...MOCK_COURSES].sort((a, b) => b.studentCount - a.studentCount);
+  return [...databaseMapped, ...fallback].slice(0, limit);
 }
 
 export async function getNewCourses(limit = 4): Promise<Course[]> {
-  return [...MOCK_COURSES]
+  const databaseCourses = (await getPublishedRows({ limit })).map(mapPublishedCourse);
+  const fallback = [...MOCK_COURSES]
     .filter((course) => course.isNew)
     .sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1))
     .slice(0, limit);
+
+  return [...databaseCourses, ...fallback].slice(0, limit);
+}
+
+export type CourseCatalogSort = "popular" | "newest";
+
+export interface CourseCatalogFilters {
+  query?: string;
+  category?: string;
+  sort?: CourseCatalogSort;
+}
+
+function normalizeSearchValue(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("vi")
+    .trim();
+}
+
+/** Danh sách dùng cho trang catalog, có tìm kiếm, lọc danh mục và sắp xếp. */
+export async function getCourseCatalog(filters: CourseCatalogFilters = {}): Promise<Course[]> {
+  const databaseCourses = (await getPublishedRows({ limit: 100 })).map(mapPublishedCourse);
+  const source = databaseCourses.length > 0 ? databaseCourses : [...MOCK_COURSES];
+  const query = normalizeSearchValue(filters.query ?? "");
+
+  const courses = source.filter((course) => {
+    if (filters.category && course.categorySlug !== filters.category) {
+      return false;
+    }
+
+    if (!query) {
+      return true;
+    }
+
+    return normalizeSearchValue(
+      [course.title, course.description, course.categoryLabel, course.instructor.name].join(" "),
+    ).includes(query);
+  });
+
+  return courses.sort((a, b) => {
+    if (filters.sort === "newest") {
+      return b.publishedAt.localeCompare(a.publishedAt);
+    }
+
+    return b.studentCount - a.studentCount;
+  });
 }
 
 export async function getFeaturedCategories(): Promise<CourseCategory[]> {
@@ -252,15 +470,38 @@ async function buildCourseDetail(course: Course | undefined): Promise<CourseDeta
 }
 
 export async function getCourseBySlug(slug: string): Promise<CourseDetail | null> {
+  const databaseCourse = await buildPublishedCourseDetail(
+    (await getPublishedRows({ slug, limit: 1 }))[0],
+  );
+  if (databaseCourse) return databaseCourse;
+
   return buildCourseDetail(MOCK_COURSES.find((c) => c.slug === slug));
 }
 
-/** Dùng để join dữ liệu catalog vào enrollment/lesson_progress thật (xem features/enrollments). */
+/** Dùng để join dữ liệu catalog vào enrollment/lesson_progress thật. */
 export async function getCourseById(id: string): Promise<CourseDetail | null> {
+  if (isUuid(id)) {
+    const databaseCourse = await buildPublishedCourseDetail(
+      (await getPublishedRows({ courseId: id, limit: 1 }))[0],
+    );
+    if (databaseCourse) return databaseCourse;
+  }
+
   return buildCourseDetail(MOCK_COURSES.find((c) => c.id === id));
 }
 
 export async function getRelatedCourses(course: Course, limit = 4): Promise<Course[]> {
+  if (isUuid(course.id)) {
+    const databaseCourses = (await getPublishedRows({ limit: 100 }))
+      .filter(
+        (candidate) =>
+          candidate.course_id !== course.id && candidate.category === course.categorySlug,
+      )
+      .map(mapPublishedCourse)
+      .slice(0, limit);
+    if (databaseCourses.length > 0) return databaseCourses;
+  }
+
   return [...MOCK_COURSES]
     .filter((c) => c.id !== course.id && c.categorySlug === course.categorySlug)
     .sort((a, b) => b.studentCount - a.studentCount)
@@ -268,5 +509,6 @@ export async function getRelatedCourses(course: Course, limit = 4): Promise<Cour
 }
 
 export async function getCourseReviews(courseId: string, limit = 10): Promise<CourseReview[]> {
+  if (isUuid(courseId)) return [];
   return (COURSE_REVIEWS[courseId] ?? []).slice(0, limit);
 }

@@ -21,7 +21,7 @@ import { signIn } from "@/features/auth/actions";
 import { loginSchema, type LoginInput } from "@/features/auth/schemas";
 import { safeAction } from "@/lib/safe-action";
 
-export function LoginForm() {
+export function LoginForm({ nextPath }: { nextPath?: string }) {
   const [formError, setFormError] = React.useState<string | null>(null);
   const [isPending, startTransition] = React.useTransition();
 
@@ -33,7 +33,7 @@ export function LoginForm() {
   function onSubmit(values: LoginInput) {
     setFormError(null);
     startTransition(async () => {
-      const result = await safeAction(() => signIn(values));
+      const result = await safeAction(() => signIn(values, nextPath));
       if (result?.error) {
         setFormError(result.error);
       }
